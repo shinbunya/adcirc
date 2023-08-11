@@ -123,6 +123,9 @@ include(${CMAKE_SOURCE_DIR}/cmake/swan.cmake)
 # ...Build PADCIRC (Parallel ADCIRC)
 include(${CMAKE_SOURCE_DIR}/cmake/padcirc.cmake)
 
+# ...Build MP_ADCIRC (Multi-Program ADCIRC)
+include(${CMAKE_SOURCE_DIR}/cmake/mp_adcirc.cmake)
+
 # ...Build PADCSWAN (Parallel ADCIRC+SWAN)
 include(${CMAKE_SOURCE_DIR}/cmake/padcswan.cmake)
 

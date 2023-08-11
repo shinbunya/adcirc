@@ -103,7 +103,12 @@ c. RJW merged 08/26/2008 from Casey 071219:Added the following variables for 3D 
       USE MESSENGER
       USE HSWRITER, ONLY: writeHotstart_through_HSwriter  !st3 100711 for hsfile
 #endif
-      
+#ifdef CMPMD
+      USE MP_MESSENGER, ONLY : MPMSG_Send_Cpl_BndVal, MPMSG_Recv_Cpl_BndFlux,
+     &   MPMSG_BUFF_FLUX
+      USE MP_INTERFACE, ONLY : MPINTF_Pack_EdgeValue
+#endif
+
 #ifdef CSWAN
 Casey 090302: We need these values from other places.
       USE OWIWIND,     ONLY: WindMultiplier
@@ -375,7 +380,7 @@ C     TIP..Tidal potential forcing
       !
       ! jgf: shift water level offset values
       if (usingDynamicWaterLevelCorrection.eqv..true.) then
-         dynamicWaterLevelCorrection1(:) = dynamicWaterLevelCorrection2(:)
+         dynamicWaterLevelCorrection1(:) = dynamicWaterLevelCorrection2 (:)
          dynamicWaterLevelCorrection2(:) = 0.d0
       endif
 C
@@ -813,10 +818,59 @@ c     WJP 03.23.18 adding in the 2D baroclinic option
          IF (C2DDI) CALL BPG2D(IT,TimeLoc)
 
       ENDIF
+
+#ifdef CMPMD
+C.......Sync flux boundary conditions along CG / DG interface
+        CALL MPINTF_Pack_EdgeValue()
+        CALL MPMSG_Send_Cpl_BndVal()
+        CALL MPMSG_Recv_Cpl_BndFlux()
+#endif
+
 C...
 C...  COMPUTE SPECIFIED NORMAL FLOW BOUNDARY CONDITION
 C...
       IF(NFLUXF.EQ.1) THEN
+#ifdef CMPMD
+         I = 0
+         QTRATIO=(TimeLoc-QTIME1)/FTIMINC
+         J = 1
+         IF(LBCODEI(J).EQ.22) THEN
+            I = I + 1
+            QNIN1(J)=QNIN2(J)
+            QNIN2(J)= - MPMSG_BUFF_FLUX((I-1)*3 + 1)
+            ! WRITE(*,*) 1, J, I, MPMSG_BUFF_FLUX((I-1)*3 + 1)
+         ENDIF
+         DO J=2,NVEL-1
+            IF(LBCODEI(J-1).EQ.22.AND.LBCODEI(J).EQ.22.AND.LBCODEI(J+1).EQ.22) THEN
+               I = I + 1
+               QNIN1(J)=QNIN2(J)
+               QNIN2(J)= - 0.5D0 * (MPMSG_BUFF_FLUX((I-2)*3 + 1) + MPMSG_BUFF_FLUX((I-1)*3 + 1))
+               ! WRITE(*,*) 2, J, I, MPMSG_BUFF_FLUX((I-2)*3 + 1), MPMSG_BUFF_FLUX((I-1)*3 + 1)
+            ELSE IF(LBCODEI(J-1).NE.22.AND.LBCODEI(J).EQ.22.AND.LBCODEI(J+1).EQ.22) THEN
+               I = I + 1
+               QNIN1(J)=QNIN2(J)
+               QNIN2(J)= - MPMSG_BUFF_FLUX((I-1)*3 + 1)
+               ! WRITE(*,*) 3, J, I, MPMSG_BUFF_FLUX((I-1)*3 + 1)
+            ELSE IF(LBCODEI(J-1).EQ.22.AND.LBCODEI(J).EQ.22.AND.LBCODEI(J+1).NE.22) THEN
+               QNIN1(J)=QNIN2(J)
+               QNIN2(J)= - MPMSG_BUFF_FLUX((I-1)*3 + 1)
+               ! WRITE(*,*) 4, J, I, MPMSG_BUFF_FLUX((I-1)*3 + 1)
+            ENDIF
+         END DO
+         J = NVEL
+         IF(LBCODEI(J).EQ.22) THEN
+            QNIN1(J)=QNIN2(J)
+            QNIN2(J)= - MPMSG_BUFF_FLUX((I-1)*3 + 1)
+            ! WRITE(*,*) 5, J, I, MPMSG_BUFF_FLUX((I-1)*3 + 1)
+         ENDIF
+         QN2=QNIN2
+         ! DO J=5,8
+         !    QN2(18-J) = QN2(J)
+         ! END DO
+         ! DO J=1,NVEL
+         !    WRITE(*,*) J, QN2(J)
+         ! END DO
+#else
          IF (NFFR.GT.0) THEN
           DO J=1,NFFR
             IF(FPER(J).EQ.0.D0) THEN
@@ -862,6 +916,7 @@ C...
             QN2=RampExtFlux*(QNIN1+QTRATIO*(QNIN2-QNIN1))
             EN2=RampExtFlux*(ENIN1+QTRATIO*(ENIN2-ENIN1))
          ENDIF
+#endif
 
 CRAL_add_42.06f
 C     jgf46.21 Collect elevation information for river radiation b.c.

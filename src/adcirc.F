@@ -121,6 +121,9 @@ C******************************************************************************
       USE WRITER, ONLY : writer_init, sendLabelInfoToWriters
       USE HSWRITER, ONLY : hswriter_init
 #endif
+#ifdef CMPMD
+      USE MESSENGER, ONLY : msg_init
+#endif
       IMPLICIT NONE
 C
       INTEGER, OPTIONAL :: COMM
@@ -197,9 +200,17 @@ C
       MNWPROC = 0            ! Init number of writer procs for serial
       MNALLPROC = 1          ! Init number of all procs for serial
       MYPROC = 0             ! Init task id for serial
+#ifdef CMPMD
+      IF (PRESENT(COMM)) THEN
+        CALL MSG_INIT(COMM)  ! Init MPI and get MPI-rank of this cpu
+      ELSE
+        CALL MSG_INIT()      ! Init MPI and get MPI-rank of this cpu
+      ENDIF
+#endif
       CALL MAKE_DIRNAME()    ! Establish Working Directory Name
       call openLogFile()     ! jgf50.65: open fort.16 file
       CALL READ_INPUT()      ! Establish sizes by reading fort.14 and fort.15
+      
 #endif
 
       ! File Fmt Version  must match Major and Minor numbers.
@@ -382,6 +393,9 @@ C******************************************************************************
       USE WRITER, ONLY : writer_main, writer_pause, sendLabelInfoToWriters
       USE HSWRITER, ONLY : hswriter_main, hswriter_pause
 #endif
+#ifdef CMPMD
+      USE MP_MESSENGER, ONLY : MPMSG_Set_nTimestep
+#endif
 C
 #ifdef CSWAN
 Casey 090302: We need the following information to couple to unstructured SWAN.
@@ -422,7 +436,15 @@ C
       ENDIF
 C
       call allMessage(INFO,"Begin timestepping.")
+
+#ifdef CMPMD
+C.......Set number of timesteps among multiple programs
+      write(*,*) 'cg: ', itime_bgn, itime_end
+      CALL MPMSG_Set_nTimestep(ITIME_END-ITIME_BGN+1)
+#endif
+
       DO 100 ITIME=ITIME_BGN,ITIME_END
+
         CALL TIMESTEP(ITIME,TimeLoc)
 C
 #ifdef CSWAN

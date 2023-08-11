@@ -61,6 +61,7 @@ C.....for internal barrier boundaries with flowthrough pipes
       INTEGER  NFLUXIBP,NPIPE
       integer  nfluxb,nfluxf,nfluxib,nfluxrbc,nfluxgbc
       integer  nfluxib64, nfluxib64_gbl !sb flag to indicate that ibtype=64 (vertical element wall) boundary exists
+      integer  nMPEdge ! sb number of edges at which variables and fluxes are shared among mutiple programs, i.e., CG and DG, through a coupler
       real(sz) :: costset
       real(sz) :: anginn
 

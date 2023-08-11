@@ -124,6 +124,13 @@ macro(addMPI TARGET)
   target_link_libraries(${TARGET} ${MPI_Fortran_LIBRARIES})
 endmacro(addMPI)
 
+macro(addMPMD TARGET)
+  target_include_directories(${TARGET} PRIVATE ${MPI_Fortran_INCLUDE_PATH})
+  target_compile_definitions(${TARGET} PRIVATE CMPMD)
+  target_compile_definitions(${TARGET} PRIVATE ${MPIMOD_FLAG})
+  target_link_libraries(${TARGET} ${MPI_Fortran_LIBRARIES})
+endmacro(addMPMD)
+
 macro(swanConfigureAdcswan)
   if(WIN32)
     add_custom_command(

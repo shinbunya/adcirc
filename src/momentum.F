@@ -832,7 +832,7 @@ C...  AUV12=-AUV21)
 C      Specified essential normal flow and free tangential slip
 
          IF((LBCODEI(I).GE.0).AND.(LBCODEI(I).LE.9)) THEN
-            VelNorm=-QN2(I)/H2
+               VelNorm=-QN2(I)/H2
             IF (abs(adcirc_norm2(TKM(:,NBDI))-sqrt(2d0)*TK(NBDI))
      &          .lt.epsilon(H2)) THEN
             ! WJP 03.6.2018 In the case of the symmetric matrix..

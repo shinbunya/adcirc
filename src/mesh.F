@@ -423,9 +423,14 @@
       NPERSEG = 0  ;
       NNPERBC = 0  ;
 
+      nMPEdge = 0
+
       do k = 1, nbou
          read(unit=iunit,fmt=*,err=10,end=20,iostat=ios) nvell(k), ibtype_orig(k)
          lineNum = lineNum + 1
+         if (ibtype_orig(k).eq.22) then
+            nMPEdge = nMPEdge + nvell(k) - 1
+         endif
          select case(ibtype_orig(k))
          ! flux boundaries (mainland, island, river)
          ! For NON BARRIER type boundaries, read the node numbers for the Kth

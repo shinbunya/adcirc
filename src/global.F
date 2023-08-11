@@ -847,8 +847,10 @@ C     cms51.06: moved fort.33 file from read_input.F to here
       OPEN(33,FILE=trim(localdir)//'/'//'fort.33', ACTION='WRITE',
      &    STATUS='REPLACE')
 #else
-      OPEN(16,FILE='fort.16', ACTION='WRITE', STATUS='REPLACE')
-      OPEN(33,FILE='fort.33', ACTION='WRITE', STATUS='REPLACE')
+      OPEN(16,FILE=trim(localdir)//'/'//'fort.16', ACTION='WRITE',
+     &    STATUS='REPLACE')
+      OPEN(33,FILE=trim(localdir)//'/'//'fort.33', ACTION='WRITE',
+     &    STATUS='REPLACE')
 #endif
 C--------------------------------------------------------------------
       END SUBROUTINE openLogFile
