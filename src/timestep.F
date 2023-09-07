@@ -105,7 +105,7 @@ c. RJW merged 08/26/2008 from Casey 071219:Added the following variables for 3D 
 #endif
 #ifdef CMPMD
       USE MP_MESSENGER, ONLY : MPMSG_Send_Cpl_BndVal, MPMSG_Recv_Cpl_BndFlux,
-     &   MPMSG_BUFF_FLUX
+     &   MPMSG_BUFF_FLUX, NFLXEDGE
       USE MP_INTERFACE, ONLY : MPINTF_Pack_EdgeValue
 #endif
 
@@ -837,31 +837,39 @@ C...
          IF(LBCODEI(J).EQ.22) THEN
             I = I + 1
             QNIN1(J)=QNIN2(J)
-            QNIN2(J)= - MPMSG_BUFF_FLUX((I-1)*3 + 1)
-            ! WRITE(*,*) 1, J, I, MPMSG_BUFF_FLUX((I-1)*3 + 1)
+            QNIN2(J)= - MPMSG_BUFF_FLUX((I-1)*NFLXEDGE + 1)
+            NNBB=NBV(J)
+            IF((QNIN2(J).GT.0.D0).AND.(NODECODE(NNBB).EQ.0)) THEN  ! If receiving positive flux, turn the node wet
+               NODECODE(NNBB) = 1
+            ENDIF
+            ! WRITE(*,*) 1, J, I, MPMSG_BUFF_FLUX((I-1)*NFLXEDGE + 1)
          ENDIF
          DO J=2,NVEL-1
             IF(LBCODEI(J-1).EQ.22.AND.LBCODEI(J).EQ.22.AND.LBCODEI(J+1).EQ.22) THEN
                I = I + 1
                QNIN1(J)=QNIN2(J)
-               QNIN2(J)= - 0.5D0 * (MPMSG_BUFF_FLUX((I-2)*3 + 1) + MPMSG_BUFF_FLUX((I-1)*3 + 1))
-               ! WRITE(*,*) 2, J, I, MPMSG_BUFF_FLUX((I-2)*3 + 1), MPMSG_BUFF_FLUX((I-1)*3 + 1)
+               QNIN2(J)= - 0.5D0 * (MPMSG_BUFF_FLUX((I-2)*NFLXEDGE + 1) + MPMSG_BUFF_FLUX((I-1)*NFLXEDGE + 1))
+               ! WRITE(*,*) 2, J, I, MPMSG_BUFF_FLUX((I-2)*NFLXEDGE + 1), MPMSG_BUFF_FLUX((I-1)*NFLXEDGE + 1)
             ELSE IF(LBCODEI(J-1).NE.22.AND.LBCODEI(J).EQ.22.AND.LBCODEI(J+1).EQ.22) THEN
                I = I + 1
                QNIN1(J)=QNIN2(J)
-               QNIN2(J)= - MPMSG_BUFF_FLUX((I-1)*3 + 1)
-               ! WRITE(*,*) 3, J, I, MPMSG_BUFF_FLUX((I-1)*3 + 1)
+               QNIN2(J)= - MPMSG_BUFF_FLUX((I-1)*NFLXEDGE + 1)
+               ! WRITE(*,*) 3, J, I, MPMSG_BUFF_FLUX((I-1)*NFLXEDGE + 1)
             ELSE IF(LBCODEI(J-1).EQ.22.AND.LBCODEI(J).EQ.22.AND.LBCODEI(J+1).NE.22) THEN
                QNIN1(J)=QNIN2(J)
-               QNIN2(J)= - MPMSG_BUFF_FLUX((I-1)*3 + 1)
-               ! WRITE(*,*) 4, J, I, MPMSG_BUFF_FLUX((I-1)*3 + 1)
+               QNIN2(J)= - MPMSG_BUFF_FLUX((I-1)*NFLXEDGE + 1)
+               ! WRITE(*,*) 4, J, I, MPMSG_BUFF_FLUX((I-1)*NFLXEDGE + 1)
+            ENDIF
+            NNBB=NBV(J)
+            IF((QNIN2(J).GT.0.D0).AND.(NODECODE(NNBB).EQ.0)) THEN  ! If receiving positive flux, turn the node wet
+               NODECODE(NNBB) = 1
             ENDIF
          END DO
          J = NVEL
          IF(LBCODEI(J).EQ.22) THEN
             QNIN1(J)=QNIN2(J)
-            QNIN2(J)= - MPMSG_BUFF_FLUX((I-1)*3 + 1)
-            ! WRITE(*,*) 5, J, I, MPMSG_BUFF_FLUX((I-1)*3 + 1)
+            QNIN2(J)= - MPMSG_BUFF_FLUX((I-1)*NFLXEDGE + 1)
+            ! WRITE(*,*) 5, J, I, MPMSG_BUFF_FLUX((I-1)*NFLXEDGE + 1)
          ENDIF
          QN2=QNIN2
          ! DO J=5,8

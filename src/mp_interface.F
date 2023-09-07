@@ -14,10 +14,10 @@
 C======================================================================
       SUBROUTINE MPINTF_Pack_EdgeValue()
 C----------------------------------------------------------------------
-      USE GLOBAL, ONLY: ETA1, QX1, QY1
+      USE GLOBAL, ONLY: ETA1, QX1, QY1, NODECODE
       USE MESH, ONLY: DP
       USE BOUNDARIES, ONLY: NVEL, NBV, LBCODEI
-      USE MP_MESSENGER, ONLY: MPMSG_BUFF_VAL, nEdge
+      USE MP_MESSENGER, ONLY: MPMSG_BUFF_VAL, nEdge, NVALEDGE
       IMPLICIT NONE
 
       INTEGER :: IEDG, J1, J2, NBDJ1, NBDJ2
@@ -38,10 +38,11 @@ C----------------------------------------------------------------------
             HB = 0.5d0*(DP(NBDJ1) + DP(NBDJ2))
             QX = 0.5d0*(QX1(NBDJ1) + QX1(NBDJ2))
             QY = 0.5d0*(QY1(NBDJ1) + QY1(NBDJ2))
-            MPMSG_BUFF_VAL(IEDG*4 + 1) = ZE
-            MPMSG_BUFF_VAL(IEDG*4 + 2) = HB
-            MPMSG_BUFF_VAL(IEDG*4 + 3) = QX
-            MPMSG_BUFF_VAL(IEDG*4 + 4) = QY
+            MPMSG_BUFF_VAL(IEDG*NVALEDGE + 1) = ZE
+            MPMSG_BUFF_VAL(IEDG*NVALEDGE + 2) = ZE + HB
+            MPMSG_BUFF_VAL(IEDG*NVALEDGE + 3) = QX
+            MPMSG_BUFF_VAL(IEDG*NVALEDGE + 4) = QY
+            MPMSG_BUFF_VAL(IEDG*NVALEDGE + 5) = NODECODE(NBDJ1)*NODECODE(NBDJ2)
             IEDG = IEDG + 1
          ENDIF
       END DO
