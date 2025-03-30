@@ -100,7 +100,7 @@ C
      &    NFLUXF, NFLUXB, NFLUXGBC, NFLUXIB, NFLUXIBP, NFLUXRBC, CSII,
      &    NFLUXIB64,
      &    BARLANHT, BARLANCFSP, NVELL, IBCONN, BARINHT, BARINCFSP,
-     &    BARINCFSB, PIPEHT, PIPECOEF, PIPEDIAM, ISSUBMERGED64, ISSUBMERGED64P
+     &    BARINCFSB, PIPEHT, PIPECOEF, PIPEDIAM, ISSUBMERGED64
       USE GLOBAL_IO, ONLY : nddt2get
       USE HARM, ONLY : updateHarmonicAnalysis
       USE WIND, ONLY : getMeteorologicalForcing, PRBCKGRND_MH2O, rsget,
@@ -1004,7 +1004,6 @@ C...  COBELL - MOVED TO WEIR_BOUNDARY.F
                   DO J = 1,NVELL(K)
                      I = I + 1
                      CALL SET_SUBMERGED64_AT(I,J,K,TIMELOC)
-                     ISSUBMERGED64P(I) = ISSUBMERGED64(I)
                   ENDDO
                   I = I + NVELL(K)
                CASE DEFAULT
