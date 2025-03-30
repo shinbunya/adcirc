@@ -47,8 +47,12 @@ C-----------------------------------------------------------------------
             REAL(8),ALLOCATABLE     :: BARLANHT1(:)   !...External Barrier elevation at previous timestep
             REAL(8),ALLOCATABLE     :: BARLANHT2(:)   !...External Barrier elevation at current timestep
             REAL(8), PARAMETER      :: BARMIN=0.04D0
-            REAL(8), PARAMETER      :: BARMIN64=0.04D0
-            REAL(8), PARAMETER      :: SUBMIN64=0.04D0
+            REAL(8), PARAMETER      :: BARMIN64=0.04D0        !...Minimum water depth above weir to appply weir formula
+            REAL(8)                 :: BARMIN64_SUBM=0.04D0   !...Minimum water depth above weir to consider submerged when the weir is already submerged
+            REAL(8)                 :: BARMIN64_NOSUBM=0.2D0  !...Minimum water depth above weir to consider submerged when the weir is not submerged
+            REAL(8)                 :: BARMIN64_SLIM=0.5D0    !...Minimum water depth above weir to consider submerged no matter the slope
+            REAL(8)                 :: BARSLIM64_ELEM=4D-4   !...Water level elemental slope threhold. A weir is considered not submerged if the water level slope is greater than this value
+            REAL(8)                 :: BARSLIM64_EDGE=1D-4   !...Water level edge slope threhold. A weir is considered not submerged if the water level slope is greater than this value
 
             !...Averaging information in time for boundaries. 
             !   This was previously zeroed out in the code, but the
@@ -2139,8 +2143,12 @@ C-----------------------------------------------------------------------
 
                 USE BOUNDARIES,ONLY:BARINCFSB,BARINCFSP,
      &              NVELL,IBCONN,BARINHT,ISSUBMERGED64,NBV
-                USE GLOBAL,ONLY:NIBNODECODE,TVW,USE_TVW,NODECODE,H0
-                USE MESH,ONLY:LBArray_Pointer,MNEI,NEITAB,NNEIGH,DP
+                USE GLOBAL,ONLY:NIBNODECODE,TVW,USE_TVW,NODECODE,H0,
+     &              IFSFM,NODES_LG
+                USE MESH,ONLY:LBArray_Pointer,DP,AREAS,NM,
+     &              MNEI,NEITAB,NNEIGH,
+     &              NNEIGHELE,NEITABELE,
+     &              sfac,SFacEle,SFMYEle,SFMXEle,FDXE,FDYE
                 IMPLICIT NONE
                 INTEGER,INTENT(IN),TARGET   :: BARRIER_INDEX
                 INTEGER,INTENT(IN),TARGET   :: BOUNDARY
@@ -2151,11 +2159,17 @@ C-----------------------------------------------------------------------
                 INTEGER                     :: NNBB1WN,NNBB2WN
                 INTEGER                     :: FLOWDIR
                 INTEGER,POINTER             :: I,J,K
-                REAL(8)                    :: RBARWL1,RBARWL2,RBARWLL
+                REAL(8)                    :: RBARWL1,RBARWL2,RBARWLL,RBARWLH
                 REAL(8)                    :: RBARWL1F,RBARWL2F
                 LOGICAL                    :: CHECK
                 INTEGER                    :: ISSUBMP
-
+ 
+                real(8) :: sfdxfac, sfdyfac, sfacavg, SFmxAvg, SFmyAvg
+                real(8) :: fdx1, fdx2, fdx3, fdy1, fdy2, fdy3
+                real(8) :: etaN1, etaN2, etaN3
+                real(8) :: detadxa, detadya, etaslp
+                integer :: ineiele, jnei, nm1, nm2, nm3, nctot, wetcnt
+       
                 CALL setMessageSource("SET_SUBMERGED64_AT")
 #if defined(WEIR_TRACE) || defined(ALL_TRACE) 
                 CALL allMessage(DEBUG,"Enter")
@@ -2216,84 +2230,130 @@ C                 when the barrier is splitted for paralell computation
                             CHECK = .TRUE.
                         ENDIF
                     ENDIF
-               ENDIF
+                ENDIF
 
-               IF(.NOT.CHECK) THEN
-                   ISSUBMERGED64(I) = 0
-                   IF(LBArray_Pointer(NNBB2)>0) THEN
-                      ISSUBMERGED64(LBArray_Pointer(NNBB2)) = 0
-                   ENDIF
+                IF(.NOT.CHECK) THEN
+                    ISSUBMERGED64(I) = 0
+                    IF(LBArray_Pointer(NNBB2)>0) THEN
+                       ISSUBMERGED64(LBArray_Pointer(NNBB2)) = 0
+                    ENDIF
 #if defined(WEIR_TRACE) || defined(ALL_TRACE) 
-                   CALL allMessage(DEBUG,"Return")
+                    CALL allMessage(DEBUG,"Return")
 #endif
-                   CALL unsetMessageSource()
-                   RETURN
-               ENDIF
+                    CALL unsetMessageSource()
+                    RETURN
+                ENDIF
 
-C..............CHECK TO SEE IF THE BARRIER ELEVATION NEEDS UPDATING
-               IF(INT_TVW)THEN
-                   IF(BAR_DEG(I))THEN
-                       CALL COMPUTE_BARRIER_HEIGHT(I,TIMELOC,BARINHT1(I)
-     &                  ,BARINHT2(I))
-                   ENDIF
-                   TVW(NNBB1) = BARINHT2(I)-BARINHT(I)
-               ENDIF
+C...............CHECK TO SEE IF THE BARRIER ELEVATION NEEDS UPDATING
+                IF(INT_TVW)THEN
+                    IF(BAR_DEG(I))THEN
+                        CALL COMPUTE_BARRIER_HEIGHT(I,TIMELOC,BARINHT1(I)
+     &                   ,BARINHT2(I))
+                    ENDIF
+                    TVW(NNBB1) = BARINHT2(I)-BARINHT(I)
+                ENDIF
 
-C..............GET WATER LEVEL ABOVE WEIR ON EACH SIDE TO COMPUTE HEAD
-C              DEFINE COMPILER FLAG -DAVERAGEWEIRFLOW TO USE BARAVGWT,
-C              WHICH GENERALLY IS SET TO ZERO, AND IS HARD CODED
-C              TO ZERO HERE. READ_INPUT.F CONTAINS THE SPECIFICATION OF 
-C              BARAVGWT. WITH BARAVGWT SET TO ZERO, THERE IS NO NEED FOR
-C              IBSTART EITHER.
+C...............GET WATER LEVEL ABOVE WEIR ON EACH SIDE TO COMPUTE HEAD
+C               DEFINE COMPILER FLAG -DAVERAGEWEIRFLOW TO USE BARAVGWT,
+C               WHICH GENERALLY IS SET TO ZERO, AND IS HARD CODED
+C               TO ZERO HERE. READ_INPUT.F CONTAINS THE SPECIFICATION OF 
+C               BARAVGWT. WITH BARAVGWT SET TO ZERO, THERE IS NO NEED FOR
+C               IBSTART EITHER.
 #if AVERAGEWEIRFLOW
-               IF(IBSTART.EQ.0)THEN
-                  RBARWL1AVG(I)=ETA2(NNBB1)-BARINHT2(I)
-                  RBARWL2AVG(I)=ETA2(NNBB2)-BARINHT2(I)
-                  IBSTART=1
-               ELSE
-                  RBARWL1AVG(I)=(ETA2(NNBB1)-BARINHT2(I)+BARAVGWT
-     &                 *RBARWL1)/(1.D0+BARAVGWT)
-                  RBARWL2AVG(I)=(ETA2(NNBB2)-BARINHT2(I)+BARAVGWT
-     &                 *RBARWL2)/(1.D0+BARAVGWT)
-               ENDIF
-               RBARWL1=RBARWL1AVG(I)
-               RBARWL2=RBARWL2AVG(I)
+                IF(IBSTART.EQ.0)THEN
+                   RBARWL1AVG(I)=ETA2(NNBB1)-BARINHT2(I)
+                   RBARWL2AVG(I)=ETA2(NNBB2)-BARINHT2(I)
+                   IBSTART=1
+                ELSE
+                   RBARWL1AVG(I)=(ETA2(NNBB1)-BARINHT2(I)+BARAVGWT
+     &                  *RBARWL1)/(1.D0+BARAVGWT)
+                   RBARWL2AVG(I)=(ETA2(NNBB2)-BARINHT2(I)+BARAVGWT
+     &                  *RBARWL2)/(1.D0+BARAVGWT)
+                ENDIF
+                RBARWL1=RBARWL1AVG(I)
+                RBARWL2=RBARWL2AVG(I)
 #else               
-C..............ZC - STREAMLINE THE PROCESS SINCE BARAVGWT IS ZERO BY DEFAULT
-               RBARWL1=ETA2(NNBB1)-BARINHT2(I)
-               RBARWL2=ETA2(NNBB2)-BARINHT2(I)
+C...............ZC - STREAMLINE THE PROCESS SINCE BARAVGWT IS ZERO BY DEFAULT
+                RBARWL1=ETA2(NNBB1)-BARINHT2(I)
+                RBARWL2=ETA2(NNBB2)-BARINHT2(I)
 #endif               
-C..............RBARWL on the lower ground side SB
-               IF(DP(NNBB1).GE.DP(NNBB2)) THEN
+C...............RBARWL on the lower ground side SB
+                IF(DP(NNBB1).GE.DP(NNBB2)) THEN
                     RBARWLL = RBARWL1
+                    RBARWLH = RBARWL2
                     NNBBL = NNBB1
                     NNBBH = NNBB2
-               ELSE
+                ELSE
                     RBARWLL = RBARWL2
+                    RBARWLH = RBARWL1
                     NNBBL = NNBB2
                     NNBBH = NNBB1
-               ENDIF
+                ENDIF
 
-               RBARWL1F=2.D0*RBARWL1/3.D0
-               RBARWL2F=2.D0*RBARWL2/3.D0
-               ISSUBMP = ISSUBMERGED64(I)
-               ISSUBMERGED64(I) = 0
-               ISSUBMERGED64(LBArray_Pointer(NNBB2)) = 0
+                RBARWL1F=2.D0*RBARWL1/3.D0
+                RBARWL2F=2.D0*RBARWL2/3.D0
+                ISSUBMP = ISSUBMERGED64(I)
+                ISSUBMERGED64(I) = 0
+                ISSUBMERGED64(LBArray_Pointer(NNBB2)) = 0
 
-               IF(RBARWLL.GE.BARMIN64) THEN
-    !            IF(RBARWLL.GE.BARMIN64.AND.
-    !  &            (ISSUBMP.NE.0.OR.(ETA2(NNBBL).GT.(ETA2(NNBBH)+2.D0*H0)))) THEN
+C...............Compute the water surface gradient of the higher ground side
+                ETASLP = 0.D0
+                IF(NODECODE(NNBBH).EQ.1.AND.RBARWLH.LT.BARMIN64_SLIM) THEN
+                    WETCNT = 0
+                    DO INEIELE = 1,NNEIGHELE(NNBBH)
+                        JNEI = NEITABELE(NNBBH,INEIELE)
+
+                        NM1 = NM(JNEI,1)
+                        NM2 = NM(JNEI,2)
+                        NM3 = NM(JNEI,3)
+
+                        NCTOT = NODECODE(NM1) + NODECODE(NM2) + NODECODE(NM3)
+                        IF(NCTOT.NE.3) CYCLE
+
+                        WETCNT = WETCNT + 1
+
+                        SFacAvg = SFacEle(JNEI)
+                        SFmxAvg = SFMXEle(JNEI)  
+                        SFmyAvg = SFMYEle(JNEI)  
+                        sfdxfac = (1 - IFSFM)*SFacAvg + IFSFM*SFmxAvg ;
+                        sfdyfac = (1 - IFSFM)*1.0D0 + IFSFM*SFmyAvg ;
+                 
+                        FDX1 = FDXE(1,JNEI)*sfdxfac  !b1
+                        FDX2 = FDXE(2,JNEI)*sfdxfac  !b2
+                        FDX3 = FDXE(3,JNEI)*sfdxfac  !b3
+                        FDY1 = FDYE(1,JNEI)*sfdyfac  !a1
+                        FDY2 = FDYE(2,JNEI)*sfdyfac  !a2
+                        FDY3 = FDYE(3,JNEI)*sfdyfac  !a3
+                 
+                        ETAN1 = ETA2(NM1)
+                        ETAN2 = ETA2(NM2)
+                        ETAN3 = ETA2(NM3)
+                    
+                        DETADXA = ETAN1*FDX1 + ETAN2*FDX2 + ETAN3*FDX3
+                        DETADYA = ETAN1*FDY1 + ETAN2*FDY2 + ETAN3*FDY3
+                        ETASLP = ETASLP + SQRT(DETADXA**2 + DETADYA**2)/AREAS(JNEI)
+                    END DO
+                    IF(WETCNT.NE.0) THEN
+                        ETASLP = ETASLP / DBLE(WETCNT)
+                    ELSE
+                        ETASLP = 99999.D0
+                    ENDIF
+                ENDIF
+
+                IF(((ISSUBMP.EQ.0.AND.RBARWLL.GE.BARMIN64_NOSUBM).OR.
+     &              (ISSUBMP.EQ.1.AND.RBARWLL.GE.BARMIN64_SUBM)).AND.
+     &             (ETASLP.LE.BARSLIM64_ELEM)) THEN
 C...............THIS IS THE MAJOR DIFFERENCE OF IBTYPE=64 FROM IBTYPE=24.
 C               WATER LEVEL ON BOTH SIDES OF BARRIER ABOVE BARRIER -> CASE 0
-                  ISSUBMERGED64(I) = 1
-                  ISSUBMERGED64(LBArray_Pointer(NNBB2)) = 1
-               ENDIF
+                   ISSUBMERGED64(I) = 1
+                   ISSUBMERGED64(LBArray_Pointer(NNBB2)) = 1
+                ENDIF
                
 #if defined(WEIR_TRACE) || defined(ALL_TRACE) 
-               CALL allMessage(DEBUG,"Return")
+                CALL allMessage(DEBUG,"Return")
 #endif
-               CALL unsetMessageSource()
-               RETURN
+                CALL unsetMessageSource()
+                RETURN
 C-----------------------------------------------------------------------
             END SUBROUTINE SET_SUBMERGED64_AT
 C-----------------------------------------------------------------------
@@ -2315,7 +2375,7 @@ C-----------------------------------------------------------------------
 
                 USE BOUNDARIES,ONLY:BARINCFSB,BARINCFSP,
      &              NVELL,IBCONN,BARINHT,ISSUBMERGED64,NBV
-                USE GLOBAL,ONLY:NIBNODECODE,TVW,USE_TVW,NODECODE,H0
+                USE GLOBAL,ONLY:NIBNODECODE,TVW,USE_TVW,NODECODE,H0,NODES_LG
                 USE MESH,ONLY:LBArray_Pointer,MNEI,NEITAB,NNEIGH,DP
                 IMPLICIT NONE
                 INTEGER,INTENT(IN),TARGET   :: BARRIER_INDEX
@@ -2469,17 +2529,21 @@ C................THE BARRIER. shintaro v46.28.sb05.05 11/01/2006
 C..................OUTWARD SUBCRITICAL FLOW -> CASE 3
                      IF(NODECODE(NNBB1).EQ.0.OR.NNBB1WN.EQ.0) THEN
                         FLUX=0.0D0
-                     ELSE
+                     ELSE IF(NODECODE(NNBB2).EQ.1) THEN
                         FLUX=-RampIntFlux*RBARWL2*BARINCFSB(I)*
      &                     (2.D0*G*(RBARWL1-RBARWL2))**0.5D0
-                    ENDIF
+                     ELSE
+                        FLUX=0.0D0
+                     ENDIF
                   ELSE
 C..................OUTWARD SUPERCRITICAL FLOW -> CASE 4
                      IF(NODECODE(NNBB1).EQ.0.OR.NNBB1WN.EQ.0) THEN
                         FLUX=0.0D0
-                     ELSE
+                     ELSE IF(NODECODE(NNBB2).EQ.1) THEN
                         FLUX=-RampIntFlux*BARINCFSP(I)*RBARWL1F*
-     &                    (RBARWL1F*G)**0.5D0
+     &                    (RBARWL1F*G)**0.
+                     ELSE
+                        FLUX=0.0D0
                      ENDIF
                   ENDIF
                ELSEIF((RBARWL2.GT.RBARWL1).AND.(RBARWL2.GT.BARMIN64)) THEN
@@ -2498,17 +2562,21 @@ C................THE BARRIER. shintaro v46.28.sb05.05 11/01/2006
 C..................INWARD SUBCRITICAL FLOW -> CASE 5
                      IF(NODECODE(NNBB2).EQ.0.OR.NNBB2WN.EQ.0) THEN
                         FLUX=0.0D0
-                     ELSE
+                     ELSE IF(NODECODE(NNBB1).EQ.1) THEN
                         FLUX=RampIntFlux*RBARWL1*BARINCFSB(I)*
      &                     (2.0D0*G*(RBARWL2-RBARWL1))**0.5D0
+                     ELSE
+                        FLUX=0.0D0
                      ENDIF
                   ELSE
 C..................INWARD SUPERCRITICAL FLOW -> CASE 6
                      IF(NODECODE(NNBB2).EQ.0.OR.NNBB2WN.EQ.0) THEN
                         FLUX=0.0D0
-                     ELSE
+                     ELSE IF(NODECODE(NNBB1).EQ.1) THEN
                         FLUX=RampIntFlux*BARINCFSP(I)*RBARWL2F*
      &                     (RBARWL2F*G)**0.5D0
+                     ELSE
+                        FLUX=0.0D0
                      ENDIF
                   ENDIF
                ELSE
