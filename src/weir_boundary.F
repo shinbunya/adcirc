@@ -46,13 +46,13 @@ C-----------------------------------------------------------------------
             REAL(8),ALLOCATABLE     :: BARINHT2(:)    !...Internal Barrier elevation at current timestep
             REAL(8),ALLOCATABLE     :: BARLANHT1(:)   !...External Barrier elevation at previous timestep
             REAL(8),ALLOCATABLE     :: BARLANHT2(:)   !...External Barrier elevation at current timestep
-            REAL(8), PARAMETER      :: BARMIN=0.04D0
-            REAL(8), PARAMETER      :: BARMIN64=0.04D0        !...Minimum water depth above weir to appply weir formula
-            REAL(8)                 :: BARMIN64_SUBM=0.04D0   !...Minimum water depth above weir to consider submerged when the weir is already submerged
-            REAL(8)                 :: BARMIN64_NOSUBM=0.2D0  !...Minimum water depth above weir to consider submerged when the weir is not submerged
-            REAL(8)                 :: BARMIN64_SLIM=0.5D0    !...Minimum water depth above weir to consider submerged no matter the slope
-            REAL(8)                 :: BARSLIM64_ELEM=4D-4   !...Water level elemental slope threhold. A weir is considered not submerged if the water level slope is greater than this value
-            REAL(8)                 :: BARSLIM64_EDGE=1D-4   !...Water level edge slope threhold. A weir is considered not submerged if the water level slope is greater than this value
+            REAL(8), PARAMETER      :: BARMIN=0.04D0  !...Minimum water depth above weir to appply weir formula
+            REAL(8), PARAMETER      :: BARMIN64=0.04D0         !...Minimum water depth above weir to appply weir formula along vertical element walls
+            REAL(8)                 :: BARMIN64_SUBM=0.04D0    !...Minimum water depth above weir to consider submerged at vertical element walls when the weir is already submerged
+            REAL(8)                 :: BARMIN64_NOSUBM=0.04D0  !...Minimum water depth above weir to consider submerged at vertical element walls when the weir is not submerged
+            REAL(8)                 :: BARMIN64_SLIM=0.5D0     !...Minimum water depth above weir to consider submerged at vertical element walls no matter the slope
+            REAL(8)                 :: BARSLIM64_ELEM=99999.D0 !...Water level elemental slope threhold for vertical element walls. A weir is considered not submerged if the water level slope is greater than this value
+            REAL(8)                 :: BARSLIM64_EDGE=99999.D0 !...Water level edge slope threhold for vertical element walls. A weir is considered not submerged if the water level slope is greater than this value
 
             !...Averaging information in time for boundaries. 
             !   This was previously zeroed out in the code, but the
@@ -2144,11 +2144,11 @@ C-----------------------------------------------------------------------
                 USE BOUNDARIES,ONLY:BARINCFSB,BARINCFSP,
      &              NVELL,IBCONN,BARINHT,ISSUBMERGED64,NBV
                 USE GLOBAL,ONLY:NIBNODECODE,TVW,USE_TVW,NODECODE,H0,
-     &              IFSFM,NODES_LG
+     &              IFSFM,NODES_LG,IFNLFA
                 USE MESH,ONLY:LBArray_Pointer,DP,AREAS,NM,
      &              MNEI,NEITAB,NNEIGH,
      &              NNEIGHELE,NEITABELE,
-     &              sfac,SFacEle,SFMYEle,SFMXEle,FDXE,FDYE
+     &              sfac,SFacEle,SFMYEle,SFMXEle,FDXE,FDYE,X,Y
                 IMPLICIT NONE
                 INTEGER,INTENT(IN),TARGET   :: BARRIER_INDEX
                 INTEGER,INTENT(IN),TARGET   :: BOUNDARY
@@ -2169,6 +2169,10 @@ C-----------------------------------------------------------------------
                 real(8) :: etaN1, etaN2, etaN3
                 real(8) :: detadxa, detadya, etaslp
                 integer :: ineiele, jnei, nm1, nm2, nm3, nctot, wetcnt
+
+                INTEGER NNBBNEI, NWETNEI, II, JJ
+                LOGICAL UNSUBMERGE
+                REAL(8) X1, X2, Y1, Y2, ET1, ET2, LEN, SLP, HTOT
        
                 CALL setMessageSource("SET_SUBMERGED64_AT")
 #if defined(WEIR_TRACE) || defined(ALL_TRACE) 
@@ -2340,15 +2344,70 @@ C...............Compute the water surface gradient of the higher ground side
                     ENDIF
                 ENDIF
 
+                ! Consider submerged if the water depth over the weir is greater than a threshold 
+                ! and the averaged elemental water surface slope on the higher ground side is less 
+                ! than a threshold
                 IF(((ISSUBMP.EQ.0.AND.RBARWLL.GE.BARMIN64_NOSUBM).OR.
      &              (ISSUBMP.EQ.1.AND.RBARWLL.GE.BARMIN64_SUBM)).AND.
      &             (ETASLP.LE.BARSLIM64_ELEM)) THEN
-C...............THIS IS THE MAJOR DIFFERENCE OF IBTYPE=64 FROM IBTYPE=24.
-C               WATER LEVEL ON BOTH SIDES OF BARRIER ABOVE BARRIER -> CASE 0
-                   ISSUBMERGED64(I) = 1
-                   ISSUBMERGED64(LBArray_Pointer(NNBB2)) = 1
+                    ISSUBMERGED64(I) = 1
+                    IF(NNBB2>0) THEN
+                        ISSUBMERGED64(LBArray_Pointer(NNBB2)) = 1
+                    ENDIF
                 ENDIF
-               
+
+C...............Check if the water suraface slope along the weir is greater than a threshold
+C...............If the slope is greater than a threshold, then the weir is not submerged
+                HTOT = ETA2(NNBB1) + IFNLFA*DP(NNBB1)
+                IF(ISSUBMERGED64(I).NE.0.AND.
+     &             NODECODE(NNBB1).NE.0.AND.
+     &             HTOT.LT.4.D0*H0) THEN
+                    UNSUBMERGE = .FALSE.
+                    X1 = X(NNBB1)
+                    Y1 = Y(NNBB1)
+                    ET1 = ETA2(NNBB1)
+                    IF(J>1) THEN
+                        NNBBNEI = NBV(I-1)
+                        X2 = X(NNBBNEI)
+                        Y2 = Y(NNBBNEI)
+                        ET2 = ETA2(NNBBNEI)
+                        LEN = SQRT((X1-X2)**2+(Y1-Y2)**2)
+                        SLP = ABS(ET1-ET2)/LEN
+                        IF(SLP.GT.BARSLIM64_EDGE) THEN
+                            UNSUBMERGE = .TRUE.
+                        ENDIF
+                    ENDIF
+                    IF(J<NVELL(K)) THEN
+                        NNBBNEI = NBV(I+1)
+                        X2 = X(NNBBNEI)
+                        Y2 = Y(NNBBNEI)
+                        ET2 = ETA2(NNBBNEI)
+                        LEN = SQRT((X1-X2)**2+(Y1-Y2)**2)
+                        SLP = ABS(ET1-ET2)/LEN
+                        IF(SLP.GT.BARSLIM64_EDGE) THEN
+                            UNSUBMERGE = .TRUE.
+                        ENDIF
+                    ENDIF
+                    IF(.NOT.UNSUBMERGE) THEN
+                        NWETNEI = 0
+                        DO JJ = 2,NNeigh(NNBB1)
+                            II = NeiTab(NNBB1,JJ)
+                            IF(NODECODE(II).NE.0) THEN
+                                NWETNEI = NWETNEI + 1
+                            ENDIF
+                        ENDDO
+                        IF(NWETNEI.LT.3) THEN
+                            UNSUBMERGE = .TRUE.
+                        ENDIF
+                    ENDIF
+                    IF(UNSUBMERGE) THEN
+                        ISSUBMERGED64(I) = 0
+                        IF(NNBB2>0) THEN
+                            ISSUBMERGED64(LBArray_Pointer(NNBB2)) = 0
+                        ENDIF
+                    ENDIF
+                ENDIF
+                
 #if defined(WEIR_TRACE) || defined(ALL_TRACE) 
                 CALL allMessage(DEBUG,"Return")
 #endif

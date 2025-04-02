@@ -2418,10 +2418,19 @@ c...     tcm v52.30.01 additions for Smag_Control Namelist
          endif
 
 C....    SB VEW1D channel control namelist
+      NAMELIST /VEW1DChannelControl/ activateVEW1DChannelWetPerimeter,
+     &  BARMIN64_SUBM, BARMIN64_NOSUBM, BARMIN64_SLIM, 
+     &  BARSLIM64_ELEM, BARSLIM64_EDGE
          if (foundVEW1DChannelControlNamelist) then
-            write(15,'(a,l,a)')
+            write(15,'(a,l,a,f15.8,a,f15.8,a,f15.8,a,f15.8,a,f15.8,a)')
      &       '&VEW1DChannelControl activateVEW1DChannelWetPerimeter=',
-     &       activateVEW1DChannelWetPerimeter," /"
+     &       activateVEW1DChannelWetPerimeter,
+     &       ', barmin64_subm=',BARMIN64_SUBM,
+     &       ', barmin64_nosubm=',BARMIN64_NOSUBM,
+     &       ', barmin64_slim=',BARMIN64_SLIM,
+     &       ', barslim64_elem=',BARSLIM64_ELEM,
+     &       ', barslim64_edge=',BARSLIM64_EDGE,
+     &       ' /'
          endif
 
 C...     wjp additions for WarnElev Namelist
