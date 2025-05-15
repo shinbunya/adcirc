@@ -457,92 +457,7 @@ NTIP
 .. _NWS:
 
 NWS
-   Parameter controlling whether wind velocity or stress, wave radiation stress and atmospheric pressure are used to force ADCIRC.
-
-   = 0, no wind, radiation stress or atmospheric pressure forcings are used.
-
-   = 1, wind stress and atmospheric pressure are read in at all grid nodes at every model time step from the Single File Meteorological Forcing Input File.
-
-   = 2, wind stress and atmospheric pressure are read in at all grid nodes at a time interval that does not equal the model time step from the Single File Meteorological Forcing Input File. Interpolation in time is used to synchronize the wind and pressure information with the model time step. The wind time interval (WTIMINC) is specified below.
-
-   = -2, wind stress and atmospheric pressure are read in at all grid nodes at a time interval that does not equal the model time step from the Single File Meteorological Forcing Input File. It is assumed that the first entry in the Single File Meteorological Forcing Input File corresponds to the time that the current model run is started. Specifically, if the model is hot started, it is assumed that first entry in the Single File Meteorological Forcing Input File corresponds to the model hot start time. Succeeding entries in the Single File Meteorological Forcing Input File occur at the time interval (WTIMINC) specified below. Interpolation in time is used to synchronize the wind and pressure information with the model time step.
-
-   = 3, wind velocity is read in from a wind file from the Single File Meteorological Forcing Input File in US Navy Fleet Numeric format. This information is interpolated in space onto the ADCIRC grid and in time to synchronize the wind and pressure information with the model time step. Garret's formula is used to compute wind stress from the wind velocity. Several parameters (IREFYR, IREFMO, IREFDAY, IREFHR, IREFMIN, REFSEC, NWLAT, NWLON, WLATMAX, WLONMIN, WLATINC, WLONINC, WTIMINC) describing the Fleet Numeric wind file must be specified below.
-
-   = 4, wind velocity and atmospheric pressure are read in (PBL/JAG format) at selected ADCIRC grid nodes from the Single File Meteorological Forcing Input File. It is assumed that the first entry in the Single File Meteorological Forcing Input File corresponds to the beginning of the model run (e.g., the cold start time). Succeeding entries occur at the time interval (WTIMINC) specified below. Thus, if the model is hot started wind data must exist in the fort.22 file dating back to the beginning of the model run so that the model can find its appropriate place in the file. Interpolation in time is used to synchronize the wind and pressure information with the model time step. Garret's formula is used to compute wind stress from wind velocity.
-
-   =-4, wind velocity and atmospheric pressure are read in (PBL/JAG format) at selected ADCIRC grid nodes from the Single File Meteorological Forcing Input File. It is assumed that the first entry in the Single File Meteorological Forcing Input File corresponds to the time that the current model run is started. Specifically, if the model is hot started, it is assumed that first entry in the Single File Meteorological Forcing Input File corresponds to the model hot start time. Succeeding entries in the Single File Meteorological Forcing Input File occur at the time interval (WTIMINC) specified below. Interpolation in time is used to synchronize the wind and pressure information with the model time step. Garret's formula is used to compute wind stress from wind velocity.
-
-   = 5, wind velocity and atmospheric pressure are read in at all grid nodes from the Single File Meteorological Forcing Input File. It is assumed that the first entry in the Single File Meteorological Forcing Input File corresponds to the beginning of the model run (e.g., the cold start time). Succeeding entries occur at the time interval (WTIMINC) specified below. Thus, if the model is hot started wind data must exist in the Single File Meteorological Forcing Input File dating back to the beginning of the model run so that the model can find its appropriate place in the file. Interpolation in time is used to synchronize the wind and pressure information with the model time step. Garret's formula is used to compute wind stress from wind velocity.
-
-   =-5, wind velocity and atmospheric pressure are read in at all grid nodes from the Single File Meteorological Forcing Input File. It is assumed that the first entry in the Single File Meteorological Forcing Input File corresponds to the time that the current model run is started. Specifically, if the model is hot started, it is assumed that first entry in the fort.22 file corresponds to the model hot start time. Succeeding entries in the Single File Meteorological Forcing Input File occur at the time interval (WTIMINC) specified below. Interpolation in time is used to synchronize the wind and pressure information with the model time step. Garret's formula is used to compute wind stress from wind velocity.
-
-   = 6, wind velocity and atmospheric pressure are read in for a rectangular grid (either in Longitude, Latitude or Cartesian coordinates, consistent with the grid coordinates) from the Single File Meteorological Forcing Input File. This information is interpolated in space onto the ADCIRC grid and in time to synchronize the wind and pressure information with the model time step. Garret's formula is used to compute wind stress from the wind velocity. Several parameters describing the rectangular grid and time increment (NWLAT, NWLON, WLATMAX, WLONMIN, WLATINC, WLONINC, WTIMINC) must be specified below. The meterological grid MUST cover the entire ADCIRC mesh; that is, the ADCIRC mesh must be ENTIRELY within the meteorological grid or an error will result.
-
-   = 7, surface stress and pressure values are read in on a regular grid from the Single File Meteorological Forcing Input File. It is assumed that the first entry in the Single File Meteorological Forcing Input File corresponds to the beginning of the model run (e.g., the cold start time). Succeeding entries occur at the time interval (WTIMINC) specified below. Thus, if the model is hot started wind data must exist in the Single File Meteorological Forcing Input File dating back to the beginning of the model run so that the model can find its appropriate place in the file. Interpolation in time is used to synchronize the wind and pressure information with the model time step.
-
-   =-7, surface stress and pressure values are read in on a regular grid from the Single File Meteorological Forcing Input File. It is assumed that the first entry in the Single File Meteorological Forcing Input File corresponds to the time that the current model run is started. Specifically, if the model is hot started, it is assumed that first entry in the fort.22 file corresponds to the model hot start time. Succeeding entries in the Single File Meteorological Forcing Input File occur at the time interval (WTIMINC) specified below. Interpolation in time is used to synchronize the wind and pressure information with the model time step.
-
-   = 8, hurricane parameters are read in from the Single File Meteorological Forcing Input File. Wind velocity and atmospheric pressure are calculated at every node on the fly by ADCIRC internally using the Dynamic Holland model. The input file is assumed to correspond to the ATCF Best Track/Objective Aid/Wind Radii Format. Historical tracks, real-time hindcast tracks and real-time forecast tracks may be found in this format. Selecting NWS = 8 also requires the specification of the cold start time, storm number, and boundary layer adjustment (see YYYY MM DD HH24 StormNumber BLAdj below). Garret's formula is used to compute wind stress from the wind velocity.
-
-   = 9, asymmetric hurricane model, no longer supported
-
-   =10, wind velocity (10 m) and atmospheric pressure are read in from a sequence of National Weather Service (NWS) Aviation (AVN) model output files. Each AVN file is assumed to contain data on a Gaussian longitude, latitude grid at a single time. Consecutive files in the sequence are separated by N hours in time (where N=WTIMINC/3600 and WTIMINC is read in below). The files are named using the convention: fort.200 – wind & pressure at the time of a model hot start (this file is not used for a cold start); fort.XX1 (where XX1=200+1*N) – wind & pressure N hours after a cold or hot start; fort.XX2 (where XX2=200+2*N) – wind & pressure 2N hours after a cold or hot start; fort.XX3 (where XX3=200+3*N) – wind & pressure 3N hours after a cold or hot start and so on for all meteorological files. Prior to ADCIRC version 34.05 these files were in binary and created from a larger Grib form file using the program UNPKGRB1. Starting with ADCIRC version 34.05, the files are in ASCII tabular format. If ADCIRC is hot started, it must be done at an even N hour interval so that the hot start time corresponds to the time of a meteorological file. Enough meteorological files must be present to extend through the ending time of the model run. Garret's formula is used to compute wind stress from the wind velocity.
-
-   =11, wind velocity (10 m) and atmospheric pressure are read in from a sequence of stripped down National Weather Service (NWS) ETA 29km model output files. Each ETA file is assumed to contain data on an E grid for a single day (8 data sets, one every 3 hours, beginning @ 03:00 and continuing through 24:00 of the given day). The files are named using the convention: fort.200 – wind & pressure the day before a model run is hot started. The final data in this file are used as the initial met condition for the hot start. This file is not used for a cold start. fort.201 – wind & pressure during the first day after a cold or hot start. fort.202 – wind & pressure during the second day after a cold or hot start fort.203 – wind & pressure during the third day after a cold or hot start. This sequence continues for all meteorological files. These files are in binary and have the format described below. The wind data is converted to an east-west, north-south coordinate system inside ADCIRC. If the model is hot started, it must be done at an even day interval so that the hot start time corresponds to the time of a meteorological file. Enough meteorological files must be present to extend through the ending time of the model run. Garret's formula is used to compute wind stress from the wind velocity.
-
-   =12, wind velocity (10 minute averaged winds at 10m) and atmospheric pressure are provided in the OWI format on one or two rectangular (lat/lon) grid(s). If two grids are used, the first is designated as the large ("basin") scale grid, and the second is designated as the small ("region") scale grid. The Single File Meteorological Forcing Input File (fort.22) is only used to specify a few configuration parameters, while the actual wind fields are recorded in files named fort.221, fort.222, fort.223, and fort.224 (with fort.223 and fort.224 being optional). The time increment of the meteorological forcing is specified through WTIMINC in the fort.15 file. The wind and pressure fields are interpolated in space onto the ADCIRC grid and in time to synchronize the wind and pressure information with the model time step. Garret's formula is used to compute wind stress from wind velocity.
-
-   =15, HWind files are data assimilated snapshots of the wind velocity fields of tropical cyclones that are produced by the NOAA Hurricane Research Division (HRD). If the NWS value is set to +15, the hours column in the associated meterological forcing input file (fort.22) is relative to the cold start time. If NWS is set to -15, that hours column is relative to the hot start time. Please see the documentation of the Single File Meteorological Forcing Input File for complete details..
-
-   =19, User has the ability to select which Isotach to use in each of the 4 quadrants. User also has ability to modify RMAX and Holland's B parameter using the ASWIP program. The auxiliary preprocessing program ASWIP.F (located in the /wind directory and executable is created by typing, make aswip, in the work folder after adcirc executable has been generated), will generate the fort.22 input file for NWS=19 from a NWS=9 formatted input file.
-
-   Hurricane parameters are read in from the Single File Meteorological Forcing Input File. It is assumed that the line in the Single File Meteorological Forcing Input File with a zero as the forecast increment (i.e., column 6) corresponds to the start of the current simulation run, whether it is a hotstart or cold start. In other words, there is no option to set the NWS value negative to indicate that the file starts at the ADCIRC hotstart time. Rather, the forecast increment in hours (column 6) is used to indicate the relationship between the ADCIRC time and the data in the fort.22 file. Wind velocity and atmospheric pressure are calculated at exact finite element mesh node locations and directly coupled to ADCIRC at every time step using the asymmetric hurricane vortex formulation (Mattocks et al, 2006; Mattocks and Forbes, 2008) based on the Holland gradient wind model. The input file is assumed to correspond to the ATCF Best Track/Objective Aid/Wind Radii Format. Historical tracks, real-time hindcast tracks and real-time forecast tracks may be found in this format. This option uses the radii at specific wind speeds (34, 50, 64, 100 knots) reported in the four quadrants (NE, SE, SW, NW) of the storm to calculate the radius of maximum winds as a function of the azimuthal angle. Garret's formula is used to compute wind stress from the wind velocity. The NWS=19 option allows the user to set a value for Rmax and Holland B Parameter. Additionally the user can select the isotachs to be used for each of the 4 quadrants. The utility program aswip_1.0.3.F located in the /wind folder will generate the NWS=19 fomatted file from a NWS=9 formatted fort.22 input file.
-
-   In order to use the NWS=19 option, the file needs to be in best track format. The forecast period (column #6) needs to be edited to reflect the time of the forecast/nowcast for each track location (each line) in hours from the start of the simulation (0, 6, 12, 18, etc). There is no -19 option to indicate that the hours in column 6 are relative to the hotstart time. For the dynamic asymmetric model (NWS=19), ADCIRC always assumes that hour 0 corresponds to when the model is started, whether that is a cold start or a hot start. Therefore, ADCIRC analysts should not attempt to set NWS to -19.  The original data in that column depends on what type of best track format data is being used. The original data might have 0 or other numbers in that column. See: http://www.nrlmry.navy.mil/atcf_web/docs/database/new/abrdeck.html
-   It is suggested that users change the "BEST" tech type to "ASYM" in column 5 in the fort.22 file to denote that the file has been modified to accommodate the asymmetric wind formulation (the simulation time in hours in the 6th column has been added, etc.) so it will not get confused in the future with a best track file.
-
-   The NWS=19 option requires the following variables in the fort.22 file in a best track format:
-
-      o 1) Forecast time in hours (column 6); enter the time in hours in each record starting at 0
-
-      o 2) Latitude of the eye (column 7)
-
-      o 3) Longitude of the eye (column 8)
-
-      o 4) Maximum sustained wind speed in knots (column 9)
-
-      o 5) Minimum sea level pressure in MB (column 10)
-
-      o 6) Wind intensity in knots of the radii defined in the record (34, 50, 64 or 100 knots) (column 12)
-
-      o 7) Radius of specified wind intensity for quadrants 1, 2, 3, 4 in NM (columns 14, 15, 16, 17); ? 0
-
-      o 8) Background pressure in MB (column 18); a standard value of 1013 can be used
-
-      o 9) Rmax as reported in the ATCF BEST TRACK file in column 20
-
-      o 10) Storm Name in Column 28 ATCF file format
-
-      o 11) Time Record number in column 29. There can be multiple lines for a given time record depending on the number of isotachs reported in the ATCF File
-
-      o 12) number of isotachs reported in the ATCF file for the corresponding Time record.
-
-      o 13) Columns 31-34 indicate the selection of radii for that particular isotach. 0 indicates do not use this radius, and 1 indicates use this radius and corresponding wind speed.
-
-      o 14) Columns 35-38 are the designated Rmax values computed for each of the quadrants selected for each particular isotach.
-
-      o 15) Column 39 is the Holland B parameter computed using the formulas outlines in the Holland paper, and implemented using the aswip program.
-
-      The format of the file is fixed and users will want to use the aswip program to be sure that the input fort.22 file is properly formatted.
-
-   =20, Generalized Asymmetric Holland Model (GAHM) Format. The track file format is similar to that of the older Dynamic Asymmetric Model (NWS = 19) but with 8 additional columns of data. See notes in the fort.22 file for more information. The theory and implementation of the GAHM was initially described at the 2013 ADCIRC Users Group Meeting.
-
-   =100, 101, 102, -102, 103, 104, -104, 105, -105, 106, 110, 111, wave radiation stress is applied in addition to meteorological forcing. The meteorological input is specified by: SIGN(NWS)*(ABS(NWS)-100). For example, NWS=100 means include wave radiation stress with no meteorological forcing (NWS=0); NWS=101 means include wave radiation stress plus meteorological forcing corresponding to NWS=1; NWS=-104 means include wave radiation stress plus meteorological forcing corresponding to NWS=-4, etc. Wave radiation stress is read from a Wave Radiation Stress Forcing File. The format of this file is similar to the generic meteorological forcing file when NWS=-4 with the exception that no pressure values are read in. The time increment between consecutive radiation stress fields (RSTIMINC) is specified below.
-
-   =300,301,302, -302, 303, 304, -304, 305, -305, 306, 310, 311, 312, -312, NWS values in the 300's indicate a SWAN+ADCIRC run Note padcswan or adcswan must be precompiled to use this option.
-
-      The SWAN wave model is dynamically coupled to the ADCIRC model. Radiation stresses and currents from the SWAN model are applied in addition to meteorological forcing. The meteorological input is specified by: SIGN(NWS)*(ABS(NWS)-300). For example, NWS=300 means include wave radiation stress with no meteorological forcing (NWS=0); NWS=301 means include wave radiation stress plus meteorological forcing corresponding to NWS=1; NWS=-304 means include wave radiation stress plus meteorological forcing corresponding to NWS=-4, etc. Wave radiation stress are computed by the SWAN model every RSTIMINC seconds and passed into ADCIRC. In addition to assigning RSTIMINC the user must have a SWAN input and control file (fort.26) in the same working directory as the fort.15 ADCIRC control file.
+   Parameter controlling whether wind velocity or stress, wave radiation stress and atmospheric pressure are used to force ADCIRC. Due to its complexity, this parameter has a dedicated documentation page: :doc:`nws_parameters`.
 
 .. _NRAMP:
 
@@ -642,7 +557,7 @@ POAN(k)
 .. _WTIMINC:
 
 WTIMINC
-   Time increment between meteorological forcing data sets (in seconds). This parameter and the line on which it appears depends on the value of the NWS parameter. See the Supplemental Meteorological/Wave/Ice Parameters table for details.
+   Time increment between meteorological forcing data sets (in seconds). This parameter and the line on which it appears depends on the value of the NWS parameter. See :ref:`nws_parameters` for details.
 
 .. _YYYY:
 

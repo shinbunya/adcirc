@@ -3,7 +3,7 @@ Input Files
 
 ADCIRC requires several input files that define the model domain, boundary conditions, and various parameters. This section describes the structure and contents of these files.
 
-.. _note:
+.. note::
 
    :doc:`fort14` and :doc:`fort15` are required. Other files are conditional.
 
@@ -49,6 +49,7 @@ Meteorological Forcing
 .. toctree::
    :maxdepth: 1
 
+   meteorological_forcing_overview
    fort22
    fort200
 
