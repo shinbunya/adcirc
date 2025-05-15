@@ -1,5 +1,5 @@
-Introduction to ADCIRC
-======================
+Introduction
+============
 
 What is ADCIRC?
 ---------------
@@ -64,6 +64,8 @@ To get started with ADCIRC, you'll need to:
 5. Analyze output
 
 For detailed installation and running instructions, see :doc:`Getting Started <../getting_started/index>`.
+
+For questions and support, please see the :doc:`Questions and Support <../questions_and_support/index>` section.
 
 ADCIRC Files
 ------------

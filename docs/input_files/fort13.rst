@@ -146,7 +146,7 @@ bridge_pilings_friction_paramenters – BK, BAlpha, BDelX, POAN
 .. _mannings_n_at_sea_floor:
 
 mannings_n_at_sea_floor – ManningsN
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
    **Description**: Manning's n. If the user elects to use this nodal attribute, NOLIBF must be set to 1 or the run will terminate. During execution, the Manning's n value specified here is converted to an equivalent quadratic friction coefficient before the bottom stress is calculated. The equivalent quadratic friction coefficient is calculated according to the following formula at each node at each time step: Cd(t)=(g*n^2)/cuberoot(depth[+eta(t)]) where depth is the bathymetric depth and [eta(t)] is the water surface elevation. The addition of the water surface elevation is conditional upon the setting of NOLIFA: eta(t) is treated as zero if NOLIFA is set to zero in the fort.15 file. Finally, the value of CF in the fort.15 is used to set a lower limit on the resulting equivalent quadratic friction coefficient, since the Cd calculated from this formula tends to become small in deep water.
 
