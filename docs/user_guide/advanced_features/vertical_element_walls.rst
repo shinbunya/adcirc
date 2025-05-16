@@ -15,13 +15,13 @@ VEWs effectively create internal boundaries that allow water to flow between adj
 .. note::
    VEWs and the :ref:`condensed_nodes` nodal attribute are implemented only for :ref:`IM` values that run ADCIRC in the lumped explicit mode.
 
-.. figure:: ../img/special_features/vertical_element_walls_schematic.png
+.. figure:: ../../img/special_features/vertical_element_walls_schematic.png
    :width: 600
    :alt: Comparison between conventional trapezoidal approach and vertical element walls
 
    Schematic comparison of traditional trapezoidal channel representation (left) and vertical element wall approach (right). 
 
-.. figure:: ../img/special_features/vertical_element_walls_schematic_3.png
+.. figure:: ../../img/special_features/vertical_element_walls_schematic_3.png
    :width: 600
    :alt: Water in a channel, on a floodplain, and their seemless interaction
 
@@ -93,7 +93,7 @@ Additionally, a special nodal attribute called :ref:`condensed_nodes` can be use
 Example Fort.14 with Vertical Element Walls
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. figure:: ../img/special_features/vertical_element_walls_schematic_13.png
+.. figure:: ../../img/special_features/vertical_element_walls_schematic_13.png
    :width: 600
    :alt: Sloping beach test model
 
@@ -167,7 +167,7 @@ This configuration allows water to flow between the floodplain and the channel w
 Example Fort.13 with Condensed Nodes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Below is an example of a :doc:`../input_files/fort13` file section for the :ref:`condensed_nodes` nodal attribute, which is used with VEWs to relax the CFL condition and obtain a quasi-1D solution along narrow channels.
+Below is an example of a :doc:`../../technical_reference/input_files/fort13` file section for the :ref:`condensed_nodes` nodal attribute, which is used with VEWs to relax the CFL condition and obtain a quasi-1D solution along narrow channels.
 
 .. parsed-literal::
    Nodal attribute file    ! :ref:`AGRID`
@@ -203,7 +203,7 @@ In this example:
 
 The :ref:`condensed_nodes` attribute is a critical component when using Vertical Element Walls for narrow channels, as it enables ADCIRC to produce a quasi-1D solution along the channel section and relax the CFL condition that would otherwise require very small time steps due to the narrow channel width.
 
-.. figure:: ../img/special_features/vertical_element_walls_schematic_4.png
+.. figure:: ../../img/special_features/vertical_element_walls_schematic_4.png
    :width: 600
    :alt: VEW channel with condensed nodes for relaxed CFL condition
 

@@ -79,7 +79,7 @@ ADCIRC uses a set of input files to define the model domain, boundary conditions
 
 The model produces various output files containing water levels, currents, and other variables at specified locations and time intervals.
 
-For detailed descriptions of all input and output files, and parameters, see the :doc:`Input Files <../input_files/index>`, :doc:`Output Files <../output_files/index>`, and :doc:`Parameters <../parameter_definitions/index>` sections of this documentation. 
+For detailed descriptions of all input and output files, and parameters, see the :doc:`Input Files <../technical_reference/input_files/index>`, :doc:`Output Files <../technical_reference/output_files/index>`, and :doc:`Parameters <../technical_reference/parameter_definitions/index>` sections of this documentation. 
 
 Contributors
 ------------

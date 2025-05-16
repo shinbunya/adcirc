@@ -1,4 +1,4 @@
-.. _NWS:
+.. _NWS_Parameter:
 
 NWS Parameter
 =============
@@ -374,76 +374,6 @@ Detailed NWS Parameter Descriptions
     * NWS=-304 means include wave radiation stress plus meteorological forcing corresponding to NWS=-4, etc.
     
     Wave radiation stress are computed by the SWAN model every RSTIMINC seconds and passed into ADCIRC. In addition to assigning RSTIMINC the user must have a SWAN input and control file (fort.26) in the same working directory as the fort.15 ADCIRC control file.
-
-Related Parameters
-------------------
-
-.. _WTIMINC:
-
-WTIMINC
-   Time increment between meteorological forcing data sets (in seconds). This parameter and the line on which it appears depends on the value of the NWS parameter.
-
-.. _RSTIMINC:
-
-RSTIMINC
-   Time interval (in seconds) between successive wave radiation stress values in the Wave Radiation Stress Forcing File. This value must be specified in the Model Parameter and Periodic Boundary Condition File if the absolute value of NWS >=100.
-
-.. _IREFYR:
-
-IREFYR, IREFMO, IREFDAY, IREFHR, IREFMIN, REFSEC
-   Starting time parameters for a Single File Meteorological Forcing Input File in US Navy Fleet Numeric format (NWS = 3, 103). These values are used in ADCIRC to compute WREFTIM which is the start time of the simulation in seconds since the beginning of the calendar year. ADCIRC is configured to accept only 1 calendar year's data, i.e., it is not possible to combine Fleet Numeric met data from two different years into a single file and then run.
-
-   IREFYR = Year of the start of the simulation
-
-   IREFMO = Month of the start of the simulation
-
-   IREFDAY = Day of the start of the simulation
-
-   IREFHR = Hour of the start of the simulation
-
-   IREFMIN = Minute of the start of the simulation
-
-   REFSEC
-      Second of the start of the simulation.
-
-.. _NWLAT:
-.. _NWLON:
-.. _WLATMAX:
-.. _WLONMIN:
-.. _WLATINC:
-.. _WLONINC:
-
-NWLAT, NWLON, WLATMAX, WLONMIN, WLATINC, WLONINC
-   Parameters describing the spatial structure of a Single File Meteorological Forcing Input File where met data is set up on a simple rectangular grid (NWS = 3, 6, 103, 106).
-
-   NWLAT = Number of latitude values in the met file.
-
-   NWLON = Number of longitude values in met file.
-
-   WLATMAX = Maximum latitude (decimal deg) of data in met file (< 0 south of the equator).
-
-   WLONMIN = Minimum longitude (decimal deg) of data in the met file (< 0 west of Greenwich meridian).
-
-   WLATINC = Latitude increment (decimal deg) of data in the met file (must be > 0).
-
-   WLONINC = Longitude increment (decimal deg) of data in the met file (must be > 0).
-
-.. _YYYY:
-
-YYYY,MM,DD,HH24,StormNumber,BLAdj
-   For the Dynamic Holland model (NWS=8) and the Dynamic Asymetric Model (NWS=19), this is the coldstart datetime, the number of the storm in forecast ensemble, and the boundary layer adjustment factor. The datetime tells ADCIRC what time corresponds to t=0. For example, if the datetime is specified as 2005 08 29 06 on a cold start, then ADCIRC will find that time in the Single File Meteorological Forcing Input File, linearly interpolating if necessary, to get its initial wind state. For a hotstart, the time in the hotstart file will be added to this datetime before seeking the proper place in the Single File Meteorological Forcing Input File. For example, if the coldstart datetime is still specified as 2005 08 29 06, and the time in the hotstart file is 86400 seconds, ADCIRC will start up and interpolate in the Single File Meteorological Forcing Input File for the conditions at 6:00 am on August 30, 2005 to get its hotstart wind state. One limitation is that an ADCIRC run cannot cross the boundary of the calendar year, i.e. start in December and end in January. StormNumber is an integer and should be set to 1. BLAdj is the adjustment factor between wind speed at 10m and the wind speed at the top of the atmospheric boundary layer (winds at top of atm. b.l.)=(winds at 10m)/BLAdj. Reasonable range is 0.7 to 0.9.
-
-.. _Geofactor:
-
-Geofactor
-   Integer that controls the form of the equation in the Generalized Asymmetric Holland Model (GAHM): (geofactor =1) the full gradient wind equation is used; (geofactor=0) a simplifying cyclostrophic balance is assumed at radius of maximum wind as done in the original Holland (1980) model derivation.
-
-   The full gradient wind equation (geofactor = 1) is preferred, particularly for large or weak storms. Using the GAHM with geofactor = 0 should give results that are similar to the older NWS=19 parametric vortex(dynamic asymmetric vortex model) which is based on the original Holland model derivation.
-
-.. _WRAMP:
-
-WRAMP
-   Time period (in seconds) over which meteorological forcing is ramped. This value is used with NWS=13 and NWS=-13 to gradually introduce meteorological forcing to avoid shock to the model. 
 
 
 .. raw:: html

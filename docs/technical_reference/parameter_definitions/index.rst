@@ -108,7 +108,7 @@ IBTYPE(k)
 
       = 52 external boundary with periodic non-zero normal flow combined with wave radiation normal to the boundary as natural boundary conditions and no constraint on the tangential flow. This is applied by specifying the non-zero contribution to the normal boundary flux integral in the continuity equation. There is no constraint on velocity (normal or tangential) in the momentum equations. This boundary condition should correctly satisfy the flux balance in a global sense but will only satisfy the normal flow at each boundary node in the limit of infinite resolution. This type of boundary represents a periodic river inflow or open ocean boundary with a weak specified normal flow condition and free tangential slip where waves are allowed to propagate freely out of the domain. Discharges are specified in the Model Parameter and Periodic Boundary Condition File as harmonic discharge forcing. Additional parameters, including DRampExtFlux and FluxSettlingTime must also be set in the Model Parameter and Periodic Boundary Condition File in order to use this boundary type.
 
-      = 64 vertical element wall boundary that allows the mesh to have two nodes at the same horizontal location with different depths and allows water to seemlessly flow over the boundary, by primarily consolidating the nodal equations and occasionally using the weir formula. This boundary type is useful to have steep-sided channels or other vertical features represented in the mesh while, unlike barrier boundaries that entirely depend on the weir formula, solutions along this boundary are primarily computed based on the governing equations. See :doc:`../special_features/vertical_element_walls` for more information.
+      = 64 vertical element wall boundary that allows the mesh to have two nodes at the same horizontal location with different depths and allows water to seemlessly flow over the boundary, by primarily consolidating the nodal equations and occasionally using the weir formula. This boundary type is useful to have steep-sided channels or other vertical features represented in the mesh while, unlike barrier boundaries that entirely depend on the weir formula, solutions along this boundary are primarily computed based on the governing equations. See :doc:`../../user_guide/advanced_features/vertical_element_walls` for more information.
 
       = 102, 112, or 122 flux specified baroclinic. In order to designate a river boundary as baroclinic, 100 should be added to the IBTYPE that would be appropriate in the barotropic case. For example, to convert a barotropic river boundary (IBTYPE of 22) to a baroclinic river boundary with freshwater inflow, change the IBTYPE to 122. If there is a 1 in the 100s place of the IBTYPE, ADCIRC will then try to read an input file (fort.39) for the salinity and/or temperature boundary condition. The format of the fort.39 file depends on the value of IDEN; see the documentation of the fort.39 file for more details.
 
@@ -557,7 +557,7 @@ POAN(k)
 .. _WTIMINC:
 
 WTIMINC
-   Time increment between meteorological forcing data sets (in seconds). This parameter and the line on which it appears depends on the value of the NWS parameter. See :ref:`nws_parameters` for details.
+   Time increment between meteorological forcing data sets (in seconds). This parameter and the line on which it appears depends on the value of the NWS parameter. See :doc:`nws_parameters` for details.
 
 .. _YYYY:
 
@@ -1268,7 +1268,7 @@ ISLIP = 3D bottom friction code
    ISLIP = 1, linear slip bottom b.c.
 
    ISLIP = 2, quadratic slip bottom b.c. where the quadratic slip coefficient is computed using Log Layer formula
-   .. image:: ../_static/log_layer_formula_islip_2.avif
+   .. image:: ../../_static/log_layer_formula_islip_2.avif
 
    ISLIP = 3, quadratic slip b.c.
 
@@ -1297,7 +1297,7 @@ Z0S, Z0B
 
    If a Manning's n roughness is read in, the roughness length is expressed in terms of the water depth H and the Manning's n:
 
-   .. image:: ../_static/z0s_z0b_eqn.avif
+   .. image:: ../../_static/z0s_z0b_eqn.avif
 
    where K = 0.4 is the von Karman constant, and g is the gravitational acceleration (Bretschneider et al., 1986). New roughness lengths are computed at each time step, based on the computed water depth and Manning's n value at each mesh vertex.
 
@@ -1424,9 +1424,9 @@ IEVC, EVMIN, EVCON
 
    IEVC =51, EV computed from Mellor-Yamada L2.5 closure with parameterizations to include enhanced mixing in the surface layer.
 
-      .. image:: ../_static/ievc_51_note.avif
+      .. image:: ../../_static/ievc_51_note.avif
 
-      .. image:: ../_static/ievc_51_eqns.avif
+      .. image:: ../../_static/ievc_51_eqns.avif
          
 .. _EVTOT:
 
@@ -3067,3 +3067,8 @@ inundationtime_onset(k)
 
 nodecode(k)
    The wet/dry state of node k where 1 indicates a node is categorized as wet on the timestep that the dataset was written while a value of 0 indicates that a node is categorized as dry.
+
+.. toctree::
+   :maxdepth: 1
+
+   nws_parameters
