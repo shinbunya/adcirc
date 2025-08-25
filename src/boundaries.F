@@ -52,8 +52,11 @@ C.....for internal barrier boundaries with flowthrough pipes
       REAL(8),ALLOCATABLE ::   BARLANHT(:),BARLANCFSP(:)
       REAL(8),ALLOCATABLE ::   BARINHT(:),BARINCFSB(:),BARINCFSP(:)
       REAL(8),ALLOCATABLE ::   PIPEHT(:),PIPECOEF(:),PIPEDIAM(:)
-      INTEGER, ALLOCATABLE ::   IBCONN(:)
-      INTEGER, ALLOCATABLE ::   ISSUBMERGED64(:) ! used to identify submerged ibtype=64 weir  SB
+      INTEGER,ALLOCATABLE ::   IBCONN(:)
+      INTEGER,ALLOCATABLE ::   ISSUBMERGED64(:) ! used to identify submerged ibtype=64 weir  SB
+      INTEGER,ALLOCATABLE ::   BNDEDGE3RD(:) ! third node of element contaiining boundary edge
+      INTEGER,ALLOCATABLE ::   BNDEDGEELEM(:) ! element containing boundary edge
+      INTEGER,ALLOCATABLE ::   BNDFORCEDWET(:) ! flag to indicate that the boundary is forced wet
       ! these arrays will only be needed temporarily, between reading 
       ! the ascii mesh file and initializing the boundaries
       REAL(8),ALLOCATABLE ::   BARLANHTR(:,:),BARLANCFSPR(:,:)
@@ -283,6 +286,9 @@ C     ---------
       allocate ( nbvv(mnbou,0:mnvel))
       allocate ( issubmerged64(mnvel))
       allocate ( bndlen2o3(mnvel))
+      allocate ( bndedge3rd(mnvel))
+      allocate ( bndedgeelem(mnvel))
+      allocate ( bndforcedwet(mnvel))
       allocate ( ntran1(mnvel),ntran2(mnvel))
       allocate ( btran3(mnvel),btran4(mnvel),btran5(mnvel))
       allocate ( btran6(mnvel),btran7(mnvel),btran8(mnvel))
@@ -307,6 +313,9 @@ C     ---------
       ibconn = -99999
       nbvv = -99999
       bndlen2o3 = -99999.0
+      bndedge3rd = -99999
+      bndedgeelem = -99999
+      bndforcedwet = -99999
       bcrnbvv = -99999
       bcrnvell = -99999
       !------------------------------------------------------------------

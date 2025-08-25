@@ -47,7 +47,7 @@ C-----------------------------------------------------------------------
             REAL(8),ALLOCATABLE     :: BARLANHT1(:)   !...External Barrier elevation at previous timestep
             REAL(8),ALLOCATABLE     :: BARLANHT2(:)   !...External Barrier elevation at current timestep
             REAL(8), PARAMETER      :: BARMIN=0.04D0  !...Minimum water depth above weir to appply weir formula
-            REAL(8), PARAMETER      :: BARMIN64=0.04D0         !...Minimum water depth above weir to appply weir formula along vertical element walls
+            REAL(8)                 :: BARMIN64=0.04D0         !...Minimum water depth above weir to appply weir formula along vertical element walls
             REAL(8)                 :: BARMIN64_SUBM=0.04D0    !...Minimum water depth above weir to consider submerged at vertical element walls when the weir is already submerged
             REAL(8)                 :: BARMIN64_NOSUBM=0.04D0  !...Minimum water depth above weir to consider submerged at vertical element walls when the weir is not submerged
             REAL(8)                 :: BARMIN64_SLIM=0.5D0     !...Minimum water depth above weir to consider submerged at vertical element walls no matter the slope
@@ -250,6 +250,7 @@ C  RESNODE HAS BEEN ESTABLISHED
 C-----------------------------------------------------------------------
             SUBROUTINE WEIR_SETUP()
                 USE BOUNDARIES,ONLY:NFLUXIB,NFLUXIBP,NFLUXB
+                USE WETDRY,ONLY:HOFF
                 IMPLICIT NONE
                 
                 CALL setMessageSource("WEIR_SETUP")
@@ -267,6 +268,12 @@ C-----------------------------------------------------------------------
                     ENDIF
 
                 ENDIF
+
+                !...Set the minimum water depth above weir to appply weir formula along vertical element walls
+                BARMIN64 = HOFF
+                BARMIN64_NOSUBM = HOFF
+                BARMIN64_SUBM = HOFF
+
 
 #if defined(TVW_TRACE) || defined(ALL_TRACE)
                 CALL allMessage(DEBUG,"Return")
@@ -2156,7 +2163,6 @@ C-----------------------------------------------------------------------
                 REAL(8),INTENT(IN)         :: TIMELOC
 
                 INTEGER                     :: NNBB1,NNBB2, NNBBL, NNBBH
-                INTEGER                     :: NNBB1WN,NNBB2WN
                 INTEGER                     :: FLOWDIR
                 INTEGER,POINTER             :: I,J,K
                 REAL(8)                    :: RBARWL1,RBARWL2,RBARWLL,RBARWLH
@@ -2186,8 +2192,6 @@ C...............SIMPLIFY VARIABLES
 
                 NNBB1=NBV(I)     ! GLOBAL NODE NUMBER ON THIS SIDE OF BARRIER
                 NNBB2=IBCONN(I)  ! GLOBAL NODE NUMBER ON OPPOSITE SIDE OF BARRIER
-                NNBB1WN = 0      ! COUNT NUMBER OF WET NEIGHBORS
-                NNBB2WN = 0      ! COUNT NUMBER OF WET NEIGHBORS
                 FLOWDIR = 0      ! DIRECTION OF FLOW
 
                 ! Check if the node ids on both sides of the barrier are valid
@@ -2199,47 +2203,6 @@ C...............SIMPLIFY VARIABLES
                         IF(LBArray_Pointer(NNBB2)>0) THEN
                             ISSUBMERGED64(LBArray_Pointer(NNBB2)) = 0
                         ENDIF
-                    ENDIF
-#if defined(WEIR_TRACE) || defined(ALL_TRACE) 
-                    CALL allMessage(DEBUG,"Return")
-#endif
-                    CALL unsetMessageSource()
-                    RETURN
-                ENDIF
-
-C...............CHECK TO SEE IF THERE IS A WET EDGE
-C                 This check is needed ocasionally but not always 
-C                 when the barrier is splitted for paralell computation
-                CHECK = .FALSE.
-                IF( (J.EQ.1).OR.(J.EQ.NVELL(K)+1) )THEN
-                    IF((NBV(I+1)>0).AND.(IBCONN(I+1)>0)) THEN
-                        NNBB1WN = NNBB1WN + NODECODE(NBV(I+1))
-                        NNBB2WN = NNBB2WN + NODECODE(IBCONN(I+1))
-                        CHECK = .TRUE.
-                    ENDIF
-                ELSE
-                    IF( J.EQ.NVELL(K).OR.(J.EQ.NVELL(K)*2) ) THEN
-                        IF((NBV(I-1)>0).AND.(IBCONN(I-1)>0)) THEN
-                            NNBB1WN = NNBB1WN + NODECODE(NBV(I-1))
-                            NNBB2WN = NNBB2WN + NODECODE(IBCONN(I-1))
-                            CHECK = .TRUE.
-                        ENDIF
-                    ELSE
-                        IF((NBV(I-1)>0).AND.(IBCONN(I-1)>0).AND.
-     &                     (NBV(I+1)>0).AND.(IBCONN(I+1)>0)) THEN
-                            NNBB1WN = NNBB1WN + NODECODE(NBV(I-1))
-                            NNBB1WN = NNBB1WN + NODECODE(NBV(I+1))
-                            NNBB2WN = NNBB2WN + NODECODE(IBCONN(I+1))
-                            NNBB2WN = NNBB2WN + NODECODE(IBCONN(I-1))
-                            CHECK = .TRUE.
-                        ENDIF
-                    ENDIF
-                ENDIF
-
-                IF(.NOT.CHECK) THEN
-                    ISSUBMERGED64(I) = 0
-                    IF(LBArray_Pointer(NNBB2)>0) THEN
-                       ISSUBMERGED64(LBArray_Pointer(NNBB2)) = 0
                     ENDIF
 #if defined(WEIR_TRACE) || defined(ALL_TRACE) 
                     CALL allMessage(DEBUG,"Return")
@@ -2433,7 +2396,8 @@ C-----------------------------------------------------------------------
      &          ISFRONT)
 
                 USE BOUNDARIES,ONLY:BARINCFSB,BARINCFSP,
-     &              NVELL,IBCONN,BARINHT,ISSUBMERGED64,NBV
+     &              NVELL,NBV,IBCONN,BARINHT,ISSUBMERGED64,BNDEDGE3RD,
+     &              BNDFORCEDWET
                 USE GLOBAL,ONLY:NIBNODECODE,TVW,USE_TVW,NODECODE,H0,NODES_LG
                 USE MESH,ONLY:LBArray_Pointer,MNEI,NEITAB,NNEIGH,DP
                 IMPLICIT NONE
@@ -2448,6 +2412,9 @@ C-----------------------------------------------------------------------
                 INTEGER                     :: NNBB1WN,NNBB2WN
                 INTEGER                     :: FLOWDIR
                 INTEGER,POINTER             :: I,J,K
+                INTEGER                     :: I1,I2
+                INTEGER                     :: N11,N12,N21,N22
+                INTEGER                     :: FORCEDWET
                 REAL(8)                    :: RBARWL1,RBARWL2,RBARWLL
                 REAL(8)                    :: RBARWL1F,RBARWL2F
                 LOGICAL                    :: CHECK
@@ -2462,6 +2429,8 @@ C...............SIMPLIFY VARIABLES
                 J => BOUNDARYNODE
                 K => BOUNDARY
 
+                I2 = LBArray_Pointer(IBCONN(I)) ! I2 is the pointer to the node on the opposite side of the barrier
+
                 NNBB1=NBV(I)     ! GLOBAL NODE NUMBER ON THIS SIDE OF BARRIER
                 NNBB2=IBCONN(I)  ! GLOBAL NODE NUMBER ON OPPOSITE SIDE OF BARRIER
                 NNBB1WN = 0      ! COUNT NUMBER OF WET NEIGHBORS
@@ -2471,7 +2440,7 @@ C...............SIMPLIFY VARIABLES
                 ! Check if the node ids on both sides of the barrier are valid
                 ! Either of them can be invalid ocasionally but not always 
                 ! when the barrier is splitted for paralell computation
-                IF((NNBB1<=0).OR.(NNBB2<=0)) THEN
+                IF((NNBB1<=0).OR.(NNBB2<=0).OR.(I2<=0)) THEN
                     FLUX = 0.D0
 #if defined(WEIR_TRACE) || defined(ALL_TRACE) 
                     CALL allMessage(DEBUG,"Return")
@@ -2484,30 +2453,97 @@ C...............CHECK TO SEE IF THERE IS A WET EDGE
 C                 This check is needed ocasionally but not always 
 C                 when the barrier is splitted for paralell computation
                 CHECK = .FALSE.
+    !             IF( (J.EQ.1).OR.(J.EQ.NVELL(K)+1) )THEN
+    !                 IF((NBV(I+1)>0).AND.(IBCONN(I+1)>0)) THEN
+    !                     NNBB1WN = NNBB1WN + NODECODE(NBV(I+1))
+    !                     NNBB2WN = NNBB2WN + NODECODE(IBCONN(I+1))
+    !                     CHECK = .TRUE.
+    !                 ENDIF
+    !             ELSE
+    !                 IF( J.EQ.NVELL(K).OR.(J.EQ.NVELL(K)*2) ) THEN
+    !                     IF((NBV(I-1)>0).AND.(IBCONN(I-1)>0)) THEN
+    !                         NNBB1WN = NNBB1WN + NODECODE(NBV(I-1))
+    !                         NNBB2WN = NNBB2WN + NODECODE(IBCONN(I-1))
+    !                         CHECK = .TRUE.
+    !                     ENDIF
+    !                 ELSE
+    !                     IF((NBV(I-1)>0).AND.(IBCONN(I-1)>0).AND.
+    !  &                     (NBV(I+1)>0).AND.(IBCONN(I+1)>0)) THEN
+    !                         NNBB1WN = NNBB1WN + NODECODE(NBV(I-1))
+    !                         NNBB1WN = NNBB1WN + NODECODE(NBV(I+1))
+    !                         NNBB2WN = NNBB2WN + NODECODE(IBCONN(I+1))
+    !                         NNBB2WN = NNBB2WN + NODECODE(IBCONN(I-1))
+    !                         CHECK = .TRUE.
+    !                     ENDIF
+    !                 ENDIF
+    !             ENDIF
+                
+                ! ------
                 IF( (J.EQ.1).OR.(J.EQ.NVELL(K)+1) )THEN
                     IF((NBV(I+1)>0).AND.(IBCONN(I+1)>0)) THEN
-                        NNBB1WN = NNBB1WN + NODECODE(NBV(I+1))
-                        NNBB2WN = NNBB2WN + NODECODE(IBCONN(I+1))
-                        CHECK = .TRUE.
+                        I1 = I + 1
+                        N11 = NBV(I1)
+                        N12 = BNDEDGE3RD(I1-1)
+                        N21 = NBV(I2-1)
+                        N22 = BNDEDGE3RD(I2-1)
+                    IF(N12.NE.0.AND.N22.NE.0) THEN
+                            IF(NODECODE(N11).NE.0.AND.NODECODE(N12).NE.0.AND.
+     &                         NODECODE(N21).NE.0.AND.NODECODE(N22).NE.0) THEN
+                                NNBB1WN = NNBB1WN + 1
+                                NNBB2WN = NNBB2WN + 1
+                                CHECK = .TRUE.
+                            ENDIF
+                        ENDIF
                     ENDIF
                 ELSE
                     IF( J.EQ.NVELL(K).OR.(J.EQ.NVELL(K)*2) ) THEN
                         IF((NBV(I-1)>0).AND.(IBCONN(I-1)>0)) THEN
-                            NNBB1WN = NNBB1WN + NODECODE(NBV(I-1))
-                            NNBB2WN = NNBB2WN + NODECODE(IBCONN(I-1))
-                            CHECK = .TRUE.
+                            I1 = I-1
+                            N11 = NBV(I1)
+                            N12 = BNDEDGE3RD(I1)
+                            N21 = NBV(I2+1)
+                            N22 = BNDEDGE3RD(I2)
+                            IF(N12.NE.0.AND.N22.NE.0) THEN
+                                IF(NODECODE(N11).NE.0.AND.NODECODE(N12).NE.0.AND.
+     &                             NODECODE(N21).NE.0.AND.NODECODE(N22).NE.0) THEN
+                                    NNBB1WN = NNBB1WN + 1
+                                    NNBB2WN = NNBB2WN + 1
+                                    CHECK = .TRUE.
+                                ENDIF
+                            ENDIF
                         ENDIF
                     ELSE
                         IF((NBV(I-1)>0).AND.(IBCONN(I-1)>0).AND.
      &                     (NBV(I+1)>0).AND.(IBCONN(I+1)>0)) THEN
-                            NNBB1WN = NNBB1WN + NODECODE(NBV(I-1))
-                            NNBB1WN = NNBB1WN + NODECODE(NBV(I+1))
-                            NNBB2WN = NNBB2WN + NODECODE(IBCONN(I+1))
-                            NNBB2WN = NNBB2WN + NODECODE(IBCONN(I-1))
-                            CHECK = .TRUE.
+                            I1 = I-1
+                            N11 = NBV(I1)
+                            N12 = BNDEDGE3RD(I1)
+                            N21 = NBV(I2+1)
+                            N22 = BNDEDGE3RD(I2)
+                            IF(N12.NE.0.AND.N22.NE.0) THEN
+                                IF(NODECODE(N11).NE.0.AND.NODECODE(N12).NE.0.AND.
+     &                             NODECODE(N21).NE.0.AND.NODECODE(N22).NE.0) THEN
+                                    NNBB1WN = NNBB1WN + 1
+                                    NNBB2WN = NNBB2WN + 1
+                                    CHECK = .TRUE.
+                                ENDIF
+                            ENDIF
+                            I1 = I+1
+                            N11 = NBV(I1)
+                            N12 = BNDEDGE3RD(I1-1)
+                            N21 = NBV(I2-1)
+                            N22 = BNDEDGE3RD(I2-1)
+                            IF(N12.NE.0.AND.N22.NE.0) THEN
+                                IF(NODECODE(N11).NE.0.AND.NODECODE(N12).NE.0.AND.
+     &                             NODECODE(N21).NE.0.AND.NODECODE(N22).NE.0) THEN
+                                    NNBB1WN = NNBB1WN + 1
+                                    NNBB2WN = NNBB2WN + 1
+                                    CHECK = .TRUE.
+                                ENDIF
+                            ENDIF
                         ENDIF
                     ENDIF
-               ENDIF
+                ENDIF
 
                IF(.NOT.CHECK) THEN
                    FLUX = 0.D0
@@ -2517,6 +2553,14 @@ C                 when the barrier is splitted for paralell computation
                    CALL unsetMessageSource()
                    RETURN
                ENDIF
+
+C...............Check if either of the nodes of the barrier is forced wet
+                IF(BNDFORCEDWET(I).EQ.1.OR.
+     &             BNDFORCEDWET(LBArray_Pointer(IBCONN(I))).EQ.1) THEN
+                    FORCEDWET = 1
+                ELSE
+                    FORCEDWET = 0
+                ENDIF
 
 C..............CHECK TO SEE IF THE BARRIER ELEVATION NEEDS UPDATING
                IF(INT_TVW)THEN
@@ -2586,23 +2630,21 @@ C................LEAST ONE WET EDGE. IF NOT, WE SHUT DOWN THE FLOW ACROSS
 C................THE BARRIER. shintaro v46.28.sb05.05 11/01/2006
                   IF(RBARWL2.GT.RBARWL1F) THEN
 C..................OUTWARD SUBCRITICAL FLOW -> CASE 3
-                     IF(NODECODE(NNBB1).EQ.0.OR.NNBB1WN.EQ.0) THEN
+                     IF(NODECODE(NNBB1).EQ.0.OR.NNBB1WN.EQ.0.OR.
+     &                  FORCEDWET.EQ.1) THEN
                         FLUX=0.0D0
-                     ELSE IF(NODECODE(NNBB2).EQ.1) THEN
+                     ELSE
                         FLUX=-RampIntFlux*RBARWL2*BARINCFSB(I)*
      &                     (2.D0*G*(RBARWL1-RBARWL2))**0.5D0
-                     ELSE
-                        FLUX=0.0D0
                      ENDIF
                   ELSE
 C..................OUTWARD SUPERCRITICAL FLOW -> CASE 4
-                     IF(NODECODE(NNBB1).EQ.0.OR.NNBB1WN.EQ.0) THEN
+                     IF(NODECODE(NNBB1).EQ.0.OR.NNBB1WN.EQ.0.OR.
+     &                  FORCEDWET.EQ.1) THEN
                         FLUX=0.0D0
-                     ELSE IF(NODECODE(NNBB2).EQ.1) THEN
-                        FLUX=-RampIntFlux*BARINCFSP(I)*RBARWL1F*
-     &                    (RBARWL1F*G)**0.
                      ELSE
-                        FLUX=0.0D0
+                        FLUX=-RampIntFlux*BARINCFSP(I)*RBARWL1F*
+     &                    (RBARWL1F*G)**0.5D0
                      ENDIF
                   ENDIF
                ELSEIF((RBARWL2.GT.RBARWL1).AND.(RBARWL2.GT.BARMIN64)) THEN
@@ -2619,27 +2661,29 @@ C................LEAST ONE WET EDGE. IF NOT, WE SHUT DOWN THE FLOW ACROSS
 C................THE BARRIER. shintaro v46.28.sb05.05 11/01/2006
                   IF(RBARWL1.GT.RBARWL2F) THEN
 C..................INWARD SUBCRITICAL FLOW -> CASE 5
-                     IF(NODECODE(NNBB2).EQ.0.OR.NNBB2WN.EQ.0) THEN
+                     IF(NODECODE(NNBB2).EQ.0.OR.NNBB2WN.EQ.0.OR.
+     &                  FORCEDWET.EQ.1) THEN
                         FLUX=0.0D0
-                     ELSE IF(NODECODE(NNBB1).EQ.1) THEN
+                     ELSE
                         FLUX=RampIntFlux*RBARWL1*BARINCFSB(I)*
      &                     (2.0D0*G*(RBARWL2-RBARWL1))**0.5D0
-                     ELSE
-                        FLUX=0.0D0
+                        ! WRITE(*,*) "Receiving flux, subcritical"
+                        ! NIBNODECODE(NNBB1)=1
                      ENDIF
                   ELSE
 C..................INWARD SUPERCRITICAL FLOW -> CASE 6
-                     IF(NODECODE(NNBB2).EQ.0.OR.NNBB2WN.EQ.0) THEN
+                     IF(NODECODE(NNBB2).EQ.0.OR.NNBB2WN.EQ.0.OR.
+     &                  FORCEDWET.EQ.1) THEN
                         FLUX=0.0D0
-                     ELSE IF(NODECODE(NNBB1).EQ.1) THEN
+                     ELSE
                         FLUX=RampIntFlux*BARINCFSP(I)*RBARWL2F*
      &                     (RBARWL2F*G)**0.5D0
-                     ELSE
-                        FLUX=0.0D0
+                        ! WRITE(*,*) "Receiving flux, supercritical"
+                        ! NIBNODECODE(NNBB1)=1
                      ENDIF
                   ENDIF
                ELSE
-                  FLUX=0
+                  FLUX=0.D0
                ENDIF
                
 #if defined(WEIR_TRACE) || defined(ALL_TRACE) 

@@ -88,7 +88,7 @@ C
       USE ADC_CONSTANTS, ONLY: rhoWat0, sigT0, waveWindMultiplier,
      &                         WaveStressGrad_Cap 
      
-      USE GWCE, ONLY : solveGWCE, numitr
+      USE GWCE, ONLY : solveGWCE, numitr, updateEta2ForDryEdgeBoundary
       USE MOMENTUM, ONLY : solveMomentumEq
       USE WETDRY, ONLY : computeWettingAndDrying
       USE WRITE_OUTPUT, ONLY : writeOutput2D, writeHotStart, 
@@ -1095,6 +1095,10 @@ C...  Compute new water surface elevation
       call solveGWCE(it, ITIME_BGN, timeloc, timeh)
 
 !---------------------END SOLVE GWCE------------------------------------
+
+      ! ! Update water surface elevation for dry edge boundary
+      ! ! considering flux across VEW boundary
+      ! call updateEta2ForDryEdgeBoundary()
 
 !JLW: adding subgrid
       IF(level0)THEN

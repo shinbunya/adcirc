@@ -158,7 +158,8 @@ CWET...
      &   loadCondensedNodes, NCondensedNodes,
      &   ListCondensedNodes, NListCondensedNodes,
      &   NNodesListCondensedNodes
-      USE BOUNDARIES, ONLY : IBCONN, ISSUBMERGED64, NFLUXIB64_GBL
+      USE BOUNDARIES, ONLY : IBCONN, ISSUBMERGED64, NFLUXIB64_GBL, BARINHT, 
+     &   LBCODEI, BNDFORCEDWET
       use global_3dvs, only : a, b, islip, kp, z0b, sigma, evtot, q
       use subdomain, only : subdomainOn, enforceBN, enforceWDcb, enforceWDob
       use subgrid, only: level0, subgridVertList, gridDepthVertETA2,
@@ -168,7 +169,7 @@ CWET...
       integer, intent(in) :: it ! time step number
       complex(8) :: duds 
       integer :: nc1, nc2, nc3
-      integer :: nm1, nm2, nm3
+      integer :: nm1, nm2, nm3, nmi
       integer :: nm123
       integer :: ncele
       integer :: nctot
@@ -183,6 +184,7 @@ CWET...
       real(8) :: htot
       real(8) :: h1
       real(8) :: tk_tmp(np),tmp1(np),tmp2(np),tmp3(np)
+      real(8) :: totArea1,totArea2,eta2Avg
       integer :: tk_cnt(np)
       integer :: nbnctot
       integer :: i,j,k,kk,l
@@ -289,17 +291,26 @@ C.....submerged. If it is the case, set the nnodecode to 1.   SB
 C.....
          IF (NFLUXIB64_GBL.GT.0) THEN
             DO I=1,NP
-               IF(LBArray_Pointer(I).GT.0) THEN
-                  J = LBArray_Pointer(I)
-                  IF((ISSUBMERGED64(J).GT.0).AND.(NODECODE(I).EQ.0)) THEN
-                     NNBB2=IBCONN(J)
-                     IF(NNBB2.GT.0) THEN ! This check is needed ocasionally but not always when the barrier is splitted for paralell computation
-                        ETA2(I) = ETA2(NNBB2)
-                        HTOT=DP(I)+ETA2(I)
-                        IF(HTOT.GT.HOFF) THEN
-                           NNODECODE(I)=1
-                           NODECODE(I)=1
-                           NCCHANGE=NCCHANGE+1 !NCCHANGE=0 set near beginning of GWCE
+               J = LBArray_Pointer(I)
+               IF(J.GT.0) THEN
+                  IF((LBCODEI(J)).EQ.64.AND.(NODECODE(I).EQ.0)) THEN
+                     IF((ISSUBMERGED64(J).GT.0)) THEN
+                        NNBB2=IBCONN(J)
+                        IF(NNBB2.GT.0) THEN ! This check is needed ocasionally but not always when the barrier is splitted for paralell computation
+                           ! ETA2(I) = ETA2(NNBB2)
+                           ! HTOT=DP(I)+ETA2(I)
+                           HTOT = DP(I) + MAX(ETA2(I), ETA2(NNBB2))
+                           IF(HTOT.GT.HOFF) THEN
+                              ! ETA2(I) = MAX(ETA2(I), ETA2(NNBB2))
+                              TotArea1 = computeTotAreaAtNode(I)
+                              TotArea2 = computeTotAreaAtNode(NNBB2)
+                              ETA2AVG = (ETA2(I)*TotArea1 + ETA2(NNBB2)*TotArea2)/(TotArea1 + TotArea2)
+                              ETA2(I) = ETA2AVG
+                              ETA2(NNBB2) = ETA2AVG
+                              NNODECODE(I)=1
+                              NODECODE(I)=1
+                              NCCHANGE=NCCHANGE+1 !NCCHANGE=0 set near beginning of GWCE
+                           ENDIF
                         ENDIF
                      ENDIF
                   ENDIF
@@ -335,6 +346,7 @@ CWET...
                IF(onIBTYP64Floodplain(NM3)) THEN
                   IBTYPE64FLOODPLAINCNT = IBTYPE64FLOODPLAINCNT + 1
                ENDIF
+               BNDFORCEDWET = 0
             ENDIF
 
             NCTOT=NODECODE(NM1)+NODECODE(NM2)+NODECODE(NM3)
@@ -351,6 +363,7 @@ CWET...
                   HTOTN2=DP(NM2)+ETA2(NM2)
                   HTOTN3=DP(NM3)+ETA2(NM3)
                ENDIF
+               NMI = 0
                IF((NODECODE(NM1).EQ.1).AND.(NODECODE(NM2).EQ.1)) THEN
                   IF((HTOTN1.GE.HOFF).AND.(HTOTN2.GE.HOFF)) THEN
                      NM123=NM1
@@ -425,6 +438,7 @@ C where:  Cd=kappa^2/(ln(z+zo)/z0)^2 is the depth integrated drag coefficient
                      IF(VEL.GT.VELMIN) THEN
 C    ....         third node met criteria and is also wet
                         NNODECODE(NM3)=1
+                        NMI = NM3
 c. RJW merged 08/26/20008 Casey 071219: Added the following logic to obtain the correct friction.
                         IF(C2DDI)THEN
 
@@ -564,6 +578,7 @@ C where:  Cd=kappa^2/(ln(z+zo)/z0)^2 is the depth integrated drag coefficient
 
                      IF(VEL.GT.VELMIN) THEN
                         NNODECODE(NM1)=1
+                        NMI = NM1
 c. RJW merged 08/26/2008 Casey 071219: Added the following logic to obtain the correct friction.
                         IF(C2DDI)THEN
                            TK_TMP(NM123) = MIN(
@@ -702,6 +717,7 @@ C where:  Cd=kappa^2/(ln(z+zo)/z0)^2 is the depth integrated drag coefficient
 
                      IF(VEL.GT.VELMIN) THEN
                         NNODECODE(NM2)=1
+                        NMI = NM2
 c. RJW merged 08/26/2008 Casey 071219: Added the following logic to obtain the correct friction.
                         IF(C2DDI)THEN                   
                         
@@ -767,6 +783,16 @@ c. RJW merged 08/26/2008 Casey 071219: Added the following logic to obtain the c
                      ENDIF
                   ENDIF
                ENDIF
+               ! IF(NFLUXIB64_GBL.gt.0.AND.NMI.gt.0) THEN
+               !    J = LBArray_Pointer(NMI)
+               !    IF(J.gt.0) THEN
+               !       IF(LBCODEI(J).EQ.64) THEN
+               !          IF(NNODECODE(NMI).NE.NODECODE(NMI)) THEN
+               !             BNDFORCEDWET(J) = 1
+               !          ENDIF
+               !       ENDIF
+               !    ENDIF
+               ! ENDIF
             ENDIF
 CWET...
 CWET...Nodal Wetting Criteria W2a
@@ -1590,6 +1616,26 @@ c.....
 
 !-----------------------------------------------------------------------
       end subroutine computeAlpha
+!-----------------------------------------------------------------------
+
+!-----------------------------------------------------------------------
+      real(8) function computeTotAreaAtNode(INODE)
+!-----------------------------------------------------------------------
+      USE MESH,ONLY: NE,NNeighEle,NeiTabEle,Areas
+      IMPLICIT NONE
+      integer, intent(in) :: INODE
+      integer :: I,IE
+      real(8) :: TotArea
+
+      TotArea = 0.d0
+      DO I=1,NNeighEle(INODE)
+         IE = NeiTabEle(INODE,I)
+         TotArea = TotArea + Areas(IE)
+      enddo
+      computeTotAreaAtNode = 0.5d0*TotArea
+      return
+!-----------------------------------------------------------------------
+      end function computeTotAreaAtNode
 !-----------------------------------------------------------------------
 
 !-----------------------------------------------------------------------

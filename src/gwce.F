@@ -1841,11 +1841,19 @@ C.................DMW202401 Use saved H1
 
             NCI=NodeCode(NBDI)
             NCJ=NodeCode(NBDJ)
-            BndLenO6NC=NCI*NCJ*BndLen2O3(J-1)/4.d0
-            GWCE_LV(NBDI)=GWCE_LV(NBDI)
+
+            IF(LBCODEI(J).EQ.64) THEN
+               ! Applying the flux at nodal basis to avoid imbalance between front and back side
+               BndLenO6NC=BndLen2O3(J-1)/4.d0
+               GWCE_LV(NBDI)=GWCE_LV(NBDI) + BndLenO6NC*3.d0*QForceI
+               GWCE_LV(NBDJ)=GWCE_LV(NBDJ) + BndLenO6NC*3.d0*QForceJ
+            ELSE
+               BndLenO6NC=NCI*NCJ*BndLen2O3(J-1)/4.d0
+               GWCE_LV(NBDI)=GWCE_LV(NBDI)
      &                              + BndLenO6NC*(2.d0*QForceI+QForceJ)
-            GWCE_LV(NBDJ)=GWCE_LV(NBDJ)
+               GWCE_LV(NBDJ)=GWCE_LV(NBDJ)
      &                              + BndLenO6NC*(2.d0*QForceJ+QForceI)
+            ENDIF
           ENDDO
         ENDIF
 
@@ -3429,6 +3437,91 @@ C
       end subroutine gwceTerminate
 !-----------------------------------------------------------------------
 
+      ! Update water surface elevation for dry edge boundary
+      ! considering flux across VEW boundary
+      SUBROUTINE updateEta2ForDryEdgeBoundary()
+      use global, only : dt,eta2,qn1,qn2,nodecode,NOFF,ESLCOUNT,screenUnit,
+     &      setMessageSource, unsetMessageSource, scratchMessage,
+     &      allMessage,logMessage, DEBUG, ECHO, INFO, WARNING, ERROR,
+     &      nodes_lg, IFSFM, ilump
+      USE MESH, ONLY : NE, NP, NM, DP, NNeigh, NeiTab, TotalArea, FDXE,
+     &   Areas, NEIMAX, SFAC, nneighele, neitabele, FDYE,
+     &   SWITCH_ELTAB_PERBC, SFacEle, SFMYEle, SFMXEle, SFCXEle,
+     &   SFCYEle, YCSFacEle, TANPHI, SFCT, TANPHIEle, LBArray_Pointer,
+     &   X, Y, CSR_POSITION
+      USE BOUNDARIES, ONLY : NETA, NFLUXF, NFLUXB, NFLUXGBC, NFLUXIB, 
+     &   NFLUXRBC, NOPE, NVEL, NBD, NBV, LBCODEI, BndLen2O3, NPEBC,
+     &   NBOU, NVELL, IBCONN, ISSUBMERGED64, nfluxib64_gbl,
+     &   BNDEDGE3RD, BNDEDGEELEM
+      USE NODALATTRIBUTES, ONLY : LoadCondensedNodes, NListCondensedNodes,
+     &   ListCondensedNodes, NNodesListCondensedNodes
+
+      implicit none
+      integer :: I,J,K,L,NBDI,NBDJ,NCI,NCJ,IE,WetI,WetJ
+      real(8) :: QFORCEI,QFORCEJ,BndLenO6NC,AreaTotI,AreaTotJ,ETA2AVG
+
+      IF((NFLUXF.EQ.1).OR.(NFLUXB.EQ.1).OR.(NFLUXIB.EQ.1)
+     &     .OR.(NFLUXGBC.EQ.1).OR.(NFLUXRBC.EQ.1)) THEN
+         NBDJ=NBV(1)
+         IF (LBCODEI(1).EQ.64)    ! 64 is added for VEW  08-11-2022 SB
+     &        QFORCEJ=0.5D0*(QN1(1)+QN2(1))
+C
+         DO J=2,NVEL
+            NBDI=NBDJ
+            NBDJ=NBV(J)
+            QFORCEI=QFORCEJ
+            NCI = NodeCode(NBDI)
+            NCJ = NodeCode(NBDJ)
+
+            AreaTotI = 0.d0
+            WetI = 0
+            do i = 1, NNeighEle(NBDI)
+               IE = NeiTabEle(NBDI,i)
+               AreaTotI = AreaTotI + 0.5D0*Areas(IE)
+               WetI = WetI + NodeCode(NM(IE,1))*NodeCode(NM(IE,2))*NodeCode(NM(IE,3))*NOFF(IE)
+            enddo
+            WetI = WetI*NCI*NCJ
+
+            AreaTotJ = 0.d0
+            WetJ = 0
+            do i = 1, NNeighEle(NBDJ)
+               IE = NeiTabEle(NBDJ,i)
+               AreaTotJ = AreaTotJ + 0.5D0*Areas(IE)
+               WetJ = WetJ + NodeCode(NM(IE,1))*NodeCode(NM(IE,2))*NodeCode(NM(IE,3))*NOFF(IE)
+            enddo
+            WetJ = WetJ*NCI*NCJ
+
+            IF(LBCODEI(J).EQ.64)     ! 64 is added for VEW  08-11-2022 SB
+     &           QFORCEJ=0.5D0*(QN1(J)+QN2(J))            
+
+            BndLenO6NC=(1-WetI)*BndLen2O3(J-1)/4.d0
+            ETA2(NBDI)=ETA2(NBDI) + DT*BndLenO6NC*3.D0*QForceI/AreaTotI
+            BndLenO6NC=(1-WetJ)*BndLen2O3(J-1)/4.d0
+            ETA2(NBDJ)=ETA2(NBDJ) + DT*BndLenO6NC*3.D0*QForceJ/AreaTotJ
+         ENDDO
+
+C....    CONDENSED NODES: Avearging nodal values at condensed nodes
+         IF((LoadCondensedNodes).AND.(ILump.NE.0)) THEN
+            DO K=1,NListCondensedNodes
+               I = ListCondensedNodes(K,1)
+               IF(I==0) CYCLE
+               IF((NODECODE(I).NE.0)) THEN
+                  ETA2AVG = 0.d0
+                  DO L=1,NNodesListCondensedNodes(K)
+                     J = ListCondensedNodes(K,L)
+                     ETA2AVG = ETA2AVG + ETA2(J)
+                  ENDDO
+                  ETA2AVG = ETA2AVG / NNodesListCondensedNodes(K)
+                  DO L=1,NNodesListCondensedNodes(K)
+                     J = ListCondensedNodes(K,L)
+                     ETA2(J) = ETA2AVG
+                  ENDDO
+               ENDIF
+            ENDDO
+         ENDIF
+
+      ENDIF
+      END SUBROUTINE updateEta2ForDryEdgeBoundary
 
 
 C----------------------------------------------------------------------
