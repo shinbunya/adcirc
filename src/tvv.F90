@@ -102,12 +102,16 @@ contains
    !-----------------------------------------------------------------------
    !  Read the VaryType=4 lines of the fulldomain TVW file, locate their VEW
    !  pairs, group them into gates and read the crest tables. Called after
-   !  WEIR_SETUP at cold and hot start. Does not change any model state.
+   !  WEIR_SETUP at cold start (no argument) and at hot start (with the
+   !  hot-start time, s). At cold start the gates are at their fort.14
+   !  position; at hot start they are moved to their position at the
+   !  hot-start time.
    !-----------------------------------------------------------------------
-   subroutine tvv_setup()
+   subroutine tvv_setup(hotstart_time)
       use SIZES, only: GLOBALDIR
       use GLOBAL, only: TVW_FILE
       use WEIR, only: found_tvw_nml
+      real(8), intent(in), optional :: hotstart_time
 
       integer :: nlines
       real(8), allocatable :: xq(:), yq(:), rq(:)
@@ -119,7 +123,7 @@ contains
       if (.not. found_tvw_nml) return
 
       call read_tvv_lines(trim(GLOBALDIR)//'/'//trim(TVW_FILE), nlines, xq, yq, rq, &
-                          line_table, line_gate, line_no)
+                          line_table, line_gate, line_no, hotstart_time)
       if (nlines == 0) return
 
       call locate_pairs(nlines, xq, yq, rq, line_no, gtop, gbed, delta, zbed, zc0)
@@ -128,6 +132,7 @@ contains
       call log_gates()
       call check_startup()
       call init_coupling()
+      if (present(hotstart_time)) call place_gates(hotstart_time)
 
       tvv_active = n_tvv_gates > 0
 
@@ -350,6 +355,57 @@ contains
    end subroutine shift_eta
 
    !-----------------------------------------------------------------------
+   !  Hot start: move the gates to their position at the hot-start time. The
+   !  water level from the hotstart file already belongs to that position, so
+   !  it is kept; the total depths and fluxes that HOTSTART computed from the
+   !  fort.14 depths are refreshed at the wall-top nodes.
+   !-----------------------------------------------------------------------
+   subroutine place_gates(timeloc)
+      use MESH, only: DP
+      use WEIR, only: BARINHT1, BARINHT2
+      use GLOBAL, only: ETA1, ETA2, H1, H2, UU2, VV2, QX2, QY2, IFNLFA, TVW
+      use SIZES, only: MYPROC
+      real(8), intent(in) :: timeloc
+      integer :: ig, k, nd
+      real(8) :: zp
+      character(1024) :: msg
+
+      do ig = 1, n_tvv_gates
+         associate (g => tvv_gates(ig))
+            do k = 1, g%npairs
+               zp = max(tvv_crest_at(ig, timeloc), g%zmin(k))
+               g%zprev(k) = zp
+               if (g%etop(k) > 0) then
+                  BARINHT1(g%etop(k)) = zp
+                  BARINHT2(g%etop(k)) = zp
+               end if
+               if (g%ebed(k) > 0) then
+                  BARINHT1(g%ebed(k)) = zp
+                  BARINHT2(g%ebed(k)) = zp
+               end if
+               nd = g%ltop(k)
+               if (nd > 0) then
+                  DP(nd) = g%delta(k) - zp
+                  H1(nd) = DP(nd) + dble(IFNLFA)*ETA1(nd)
+                  H2(nd) = DP(nd) + dble(IFNLFA)*ETA2(nd)
+                  QX2(nd) = UU2(nd)*H2(nd)
+                  QY2(nd) = VV2(nd)*H2(nd)
+               end if
+               if (allocated(TVW)) then
+                  if (g%ltop(k) > 0) TVW(g%ltop(k)) = zp - g%zc0(k)
+                  if (g%lbed(k) > 0) TVW(g%lbed(k)) = zp - g%zc0(k)
+               end if
+            end do
+            if (MYPROC == 0) then
+               write (msg, '(A,I0,A,ES14.7,A,ES14.7,A)') "TVV: gate ", ig, " placed at crest ", &
+                  g%zprev(1), " m for the hot start at t = ", timeloc, " s"
+               call allMessage(INFO, trim(msg))
+            end if
+         end associate
+      end do
+   end subroutine place_gates
+
+   !-----------------------------------------------------------------------
    !  Data for the water-level shift that must be the same on every rank:
    !  nodal areas (computed where the node is resident, so that all its
    !  elements are present), condensed group of each wall-top node, and the
@@ -444,10 +500,11 @@ contains
    !  crest table). line_no is the line's position among all entries in the
    !  file, for messages.
    !-----------------------------------------------------------------------
-   subroutine read_tvv_lines(fname, nlines, xq, yq, rq, gate_tables, line_gate, line_no)
+   subroutine read_tvv_lines(fname, nlines, xq, yq, rq, gate_tables, line_gate, line_no, hotstart_time)
       use mod_io, only: openFileForRead
-      use GLOBAL, only: TVV_SEARCH_RADIUS, IHOT, ITHS, DTDP
+      use GLOBAL, only: TVV_SEARCH_RADIUS
       character(*), intent(in) :: fname
+      real(8), intent(in), optional :: hotstart_time
       integer, intent(out) :: nlines
       real(8), allocatable, intent(out) :: xq(:), yq(:), rq(:)
       character(len=1024), allocatable, intent(out) :: gate_tables(:)
@@ -552,7 +609,7 @@ contains
          tvv_gates(ig)%table_file = gate_tables(ig)
          tvv_gates(ig)%hot = hots(ig)
          tvv_gates(ig)%toffset = 0d0
-         if (hots(ig) == 1 .and. IHOT /= 0) tvv_gates(ig)%toffset = DTDP*dble(ITHS)
+         if (hots(ig) == 1 .and. present(hotstart_time)) tvv_gates(ig)%toffset = hotstart_time
       end do
 
    end subroutine read_tvv_lines
