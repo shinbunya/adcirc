@@ -276,7 +276,7 @@ C
      &     TAU0VAR, HighResTimeVaryingTau0, FullDomainTimeVaryingTau0,
      &     CalculateTimeVaryingTau0, LoadAdvectionState, advectlocal,
      &     LoadCondensedNodes, ListCondensedNodes, NListCondensedNodes, ! Added for VEW1D  08-11-2022 SB
-     &     NNodesListCondensedNodes, NCondensedNodes,                    !
+     &     CondensedNodes, NNodesListCondensedNodes, NCondensedNodes,                    !
 C... DW
      &     LoadAbsLayerSigma, absorblayer_sigma_eta,
      &     absorblayer_sigma_mnx, absorblayer_sigma_mny
@@ -1916,6 +1916,10 @@ C     VEW: Sum front side values to back side
                         IF(ISSUBMERGED64(I).NE.0) THEN
                            NNBB1=NBV(I)     ! GLOBAL NODE NUMBER ON THIS SIDE OF BARRIER
                            NNBB2=IBCONN(I)  ! GLOBAL NODE NUMBER ON OPPOSITE SIDE OF BARRIER
+                           IF(CONDENSEDNODES(NNBB1,1).NE.0) THEN
+                              NNBB2=NBV(I)     ! FLIP NNBB1 and NNBB2 IF NNBB1 BELONGS
+                              NNBB1=IBCONN(I)  ! TO A CONDENSED NODE GROUP.
+                           ENDIF
                            IF(NODECODE(NNBB1).NE.0.AND.NODECODE(NNBB2).NE.0) THEN
                                COEFDTemp(NNBB2) =
      &                           COEFD(NNBB1) + COEFD(NNBB2)
@@ -1980,6 +1984,10 @@ C     VEW: Copy values from back side to front side
                         IF(ISSUBMERGED64(I).NE.0) THEN
                            NNBB1=NBV(I)     ! GLOBAL NODE NUMBER ON THIS SIDE OF BARRIER
                            NNBB2=IBCONN(I)  ! GLOBAL NODE NUMBER ON OPPOSITE SIDE OF BARRIER
+                           IF(CONDENSEDNODES(NNBB1,1).NE.0) THEN
+                              NNBB2=NBV(I)     ! FLIP NNBB1 and NNBB2 IF NNBB1 BELONGS
+                              NNBB1=IBCONN(I)  ! TO A CONDENSED NODE GROUP.
+                           ENDIF
                            IF(NODECODE(NNBB1).NE.0.AND.NODECODE(NNBB2).NE.0) THEN
                               COEFDTemp(NNBB1) = COEFDTemp(NNBB2)
                               GWCE_LV(NNBB1) = GWCE_LV(NNBB2)
