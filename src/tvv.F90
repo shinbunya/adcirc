@@ -66,7 +66,7 @@ module mod_tvv
    integer, public :: n_tvv_gates = 0
    type(t_tvv_gate), allocatable, public :: tvv_gates(:)
 
-   public :: tvv_setup, tvv_crest_at
+   public :: tvv_setup, tvv_crest_at, tvv_apply
 
    !...Variables of the TimeVaryingWeir namelist. The group holds every variable
    !   of the namelist read in weir_boundary.F90, so any valid line can be read.
@@ -124,6 +124,40 @@ contains
       tvv_active = n_tvv_gates > 0
 
    end subroutine tvv_setup
+
+   !-----------------------------------------------------------------------
+   !  Move the gates to their position at time timeloc. Called once per time
+   !  step, at the top of TIMESTEP, on every rank:
+   !    crest of both boundary entries of each pair: BARINHT2 = z_c
+   !    wall-top node depth: DP = delta - z_c
+   !  z_c is clamped per pair to at least bed + delta.
+   !-----------------------------------------------------------------------
+   subroutine tvv_apply(timeloc)
+      use MESH, only: DP
+      use BOUNDARIES, only: BARINHT
+      use WEIR, only: BARINHT2
+      use GLOBAL, only: TVW
+      real(8), intent(in) :: timeloc
+      integer :: ig, k
+      real(8) :: zc, zp
+
+      if (.not. tvv_active) return
+      do ig = 1, n_tvv_gates
+         associate (g => tvv_gates(ig))
+            zc = tvv_crest_at(ig, timeloc)
+            do k = 1, g%npairs
+               zp = max(zc, g%zmin(k))
+               if (g%etop(k) > 0) BARINHT2(g%etop(k)) = zp
+               if (g%ebed(k) > 0) BARINHT2(g%ebed(k)) = zp
+               if (g%ltop(k) > 0) DP(g%ltop(k)) = g%delta(k) - zp
+               if (allocated(TVW)) then
+                  if (g%ltop(k) > 0) TVW(g%ltop(k)) = zp - g%zc0(k)
+                  if (g%lbed(k) > 0) TVW(g%lbed(k)) = zp - g%zc0(k)
+               end if
+            end do
+         end associate
+      end do
+   end subroutine tvv_apply
 
    !-----------------------------------------------------------------------
    !  Crest elevation of gate ig at time timeloc: linear interpolation of
@@ -522,7 +556,8 @@ contains
       use GLOBAL, only: ILUMP, IHOT, STATIM, TVV_DELTA
       use MESH, only: NP, DP
       use NodalAttributes, only: Tau0, LoadTau0, Tau0DefVal, LoadCondensedNodes, &
-                                 NListCondensedNodes, NNodesListCondensedNodes, ListCondensedNodes
+                                 NListCondensedNodes, NNodesListCondensedNodes, ListCondensedNodes, &
+                                 activateVEW1DChannelWetPerimeter
       integer :: ig, k, m, n, n1
       integer, allocatable :: topgate(:), toppair(:)
       real(8) :: zc
@@ -532,6 +567,11 @@ contains
       if (ILUMP == 0) then
          call terminate(exit_code=ADCIRC_EXIT_FAILURE, message="TVV: time-varying crest VEWs "// &
                         "need a lumped GWCE mass matrix (ILump=1); a consistent mass matrix is not supported yet.")
+      end if
+      !...The VEW1D wet-perimeter friction caches bank elevations from DP at startup
+      if (activateVEW1DChannelWetPerimeter) then
+         call terminate(exit_code=ADCIRC_EXIT_FAILURE, message="TVV: time-varying crest VEWs "// &
+                        "cannot be combined with activateVEW1DChannelWetPerimeter yet.")
       end if
       if ((.not. LoadTau0 .and. Tau0 < 0d0) .or. (LoadTau0 .and. Tau0DefVal < 0d0)) then
          call terminate(exit_code=ADCIRC_EXIT_FAILURE, message="TVV: time-varying crest VEWs "// &
