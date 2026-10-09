@@ -2040,6 +2040,11 @@ C...  JCG ITERATIVE MATRIX SOLVER
          NUMITR=0
          DO I=1,NP
             ETA2(I)=NODECODE(I)*(ETAS(I)+dynamicWaterLevelCorrectionDelta(I))+ETA1(I) !COMPUTE NEW ELEVATIONS tgaContOffset
+C           A dry node keeps its water level, so its increment is zero. ETAS
+C           would otherwise hold GWCE_LV/COEFD with the placeholder diagonal
+C           (EP above, which depends on the subdomain) and enter the next
+C           step's equations if the node wets.
+            IF(NODECODE(I).EQ.0) ETAS(I)=0.D0
          END DO
       ENDIF
 
