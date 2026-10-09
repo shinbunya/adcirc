@@ -338,6 +338,8 @@ C... SB
       REAL(8) Pr1N1, Pr1N2, Pr1N3
       REAL(8) Off1N1, Off1N2, Off1N3 ! water level offsets
       REAL(8) QX1N1, QX1N2, QX1N3, QY1N1, QY1N2, QY1N3, QX1Avg, QY1Avg
+      INTEGER NWETCN                    ! wet members of a condensed group
+      REAL(8) CDSUMCN, LVSUMCN, E1SUMCN ! sums over its wet members
       REAL(8) SFacAvg, SFmxAvg, SFmyAvg, sfdxfac, sfdyfac 
       REAL(8) SFCXAvg, SFCYAvg, YCFACAvg, SFCXADJ, SFCYADJ, TANPHIAvg
       REAL(8) T0N1,T0N2, T0N3
@@ -1943,27 +1945,34 @@ C     VEW: Sum front side values to back side
       ENDIF
 
 C.... CONDENSED NODES: Summing up the values at condensed nodes
+C.... Only wet members (NODECODE.NE.0) take part: a dry node carries a
+C.... placeholder diagonal (EP above) and no meaningful ETA1, which must
+C.... not enter the equation of the wet members.
       IF((LoadCondensedNodes).AND.(ILump.NE.0)) THEN
          DO K=1,NListCondensedNodes
-            I = ListCondensedNodes(K,1)
-            IF(I==0) CYCLE
-            IF((NODECODE(I).NE.0)) THEN
-               ! 1) Sum them up
-               DO L=2,NNodesListCondensedNodes(K)
-                  J = ListCondensedNodes(K,L)
-                  COEFDTemp(I) = COEFDTemp(I) + COEFDTemp(J)
-                  GWCE_LV(I)   = GWCE_LV(I) + GWCE_LV(J)
-                  ETA1(I)      = ETA1(I) + ETA1(J)
-               ENDDO
-               ! 2) Distribute them
-               ETA1(I) = ETA1(I) / NNodesListCondensedNodes(K)
-               DO L=2,NNodesListCondensedNodes(K)
-                  J = ListCondensedNodes(K,L)
-                  COEFDTemp(J) = COEFDTemp(I)
-                  GWCE_LV(J)   = GWCE_LV(I)
-                  ETA1(J)      = ETA1(I)
-               ENDDO
-            ENDIF
+            IF(ListCondensedNodes(K,1)==0) CYCLE
+            ! 1) Sum them up over the wet members
+            NWETCN = 0
+            CDSUMCN = 0.D0
+            LVSUMCN = 0.D0
+            E1SUMCN = 0.D0
+            DO L=1,NNodesListCondensedNodes(K)
+               J = ListCondensedNodes(K,L)
+               IF(NODECODE(J).EQ.0) CYCLE
+               NWETCN  = NWETCN + 1
+               CDSUMCN = CDSUMCN + COEFDTemp(J)
+               LVSUMCN = LVSUMCN + GWCE_LV(J)
+               E1SUMCN = E1SUMCN + ETA1(J)
+            ENDDO
+            IF(NWETCN.EQ.0) CYCLE
+            ! 2) Distribute them to the wet members
+            DO L=1,NNodesListCondensedNodes(K)
+               J = ListCondensedNodes(K,L)
+               IF(NODECODE(J).EQ.0) CYCLE
+               COEFDTemp(J) = CDSUMCN
+               GWCE_LV(J)   = LVSUMCN
+               ETA1(J)      = E1SUMCN / NWETCN
+            ENDDO
          ENDDO
       ENDIF
 
