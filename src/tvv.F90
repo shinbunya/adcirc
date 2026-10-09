@@ -60,6 +60,13 @@ module mod_tvv
       real(8), allocatable :: delta(:) !...m, crest minus wall-top elevation
       real(8), allocatable :: zmin(:) !...m, lowest crest: bed elevation + delta
       real(8), allocatable :: zc0(:) !...m, crest in fort.14 (BARINHT)
+      real(8), allocatable :: zprev(:) !...m, crest applied in the previous time step
+      real(8), allocatable :: atop(:), abed(:) !...m^2, nodal areas (same on every rank)
+      integer, allocatable :: cid(:) !...condensed group of the wall-top node: smallest fulldomain node number in it
+      logical :: moving = .false. !...the crest moved in the latest time step
+      real(8) :: move_start = 0d0 !...s, start of the current movement
+      real(8) :: dvol = 0d0 !...m^3, volume change by the TVV update during the current movement (this rank)
+      integer :: ncoupled = 0 !...largest number of submerged (coupled) pairs during the current movement
    end type t_tvv_gate
 
    logical, public :: tvv_active = .false.
@@ -120,6 +127,7 @@ contains
       call read_tables()
       call log_gates()
       call check_startup()
+      call init_coupling()
 
       tvv_active = n_tvv_gates > 0
 
@@ -130,34 +138,280 @@ contains
    !  step, at the top of TIMESTEP, on every rank:
    !    crest of both boundary entries of each pair: BARINHT2 = z_c
    !    wall-top node depth: DP = delta - z_c
-   !  z_c is clamped per pair to at least bed + delta.
+   !  z_c is clamped per pair to at least bed + delta. When a crest moves by
+   !  dz, the water level is shifted to conserve volume (design note 6.3):
+   !    a wall-top node not coupled to other nodes keeps its total depth,
+   !      deta = dz;
+   !    a coupled group (nodes tied by submerged VEW pairs and condensed node
+   !      groups, which share eta) gets one shift for all its nodes,
+   !      deta = sum(A_top*dz)/sum(A),
+   !  applied to every eta time level carried into the step, and the total
+   !  depth H2 at the shifted nodes is refreshed.
    !-----------------------------------------------------------------------
    subroutine tvv_apply(timeloc)
       use MESH, only: DP
-      use BOUNDARIES, only: BARINHT
       use WEIR, only: BARINHT2
       use GLOBAL, only: TVW
       real(8), intent(in) :: timeloc
       integer :: ig, k
-      real(8) :: zc, zp
+      real(8) :: zc, v0
+      real(8), allocatable :: zp(:), dz(:)
 
       if (.not. tvv_active) return
       do ig = 1, n_tvv_gates
          associate (g => tvv_gates(ig))
             zc = tvv_crest_at(ig, timeloc)
+            zp = max(zc, g%zmin)
+            dz = zp - g%zprev
+            if (any(dz /= 0d0)) then
+               if (.not. g%moving) then
+                  g%moving = .true.
+                  g%move_start = timeloc
+                  g%dvol = 0d0
+                  g%ncoupled = 0
+               end if
+               v0 = gate_volume(ig)
+            elseif (g%moving) then
+               call report_movement(ig, timeloc)
+            end if
             do k = 1, g%npairs
-               zp = max(zc, g%zmin(k))
-               if (g%etop(k) > 0) BARINHT2(g%etop(k)) = zp
-               if (g%ebed(k) > 0) BARINHT2(g%ebed(k)) = zp
-               if (g%ltop(k) > 0) DP(g%ltop(k)) = g%delta(k) - zp
+               if (g%etop(k) > 0) BARINHT2(g%etop(k)) = zp(k)
+               if (g%ebed(k) > 0) BARINHT2(g%ebed(k)) = zp(k)
+               if (g%ltop(k) > 0) DP(g%ltop(k)) = g%delta(k) - zp(k)
                if (allocated(TVW)) then
-                  if (g%ltop(k) > 0) TVW(g%ltop(k)) = zp - g%zc0(k)
-                  if (g%lbed(k) > 0) TVW(g%lbed(k)) = zp - g%zc0(k)
+                  if (g%ltop(k) > 0) TVW(g%ltop(k)) = zp(k) - g%zc0(k)
+                  if (g%lbed(k) > 0) TVW(g%lbed(k)) = zp(k) - g%zc0(k)
                end if
             end do
+            !...dz is the same on every rank, so all ranks take this branch together
+            if (any(dz /= 0d0)) then
+               call shift_eta(ig, dz)
+               g%dvol = g%dvol + gate_volume(ig) - v0
+            end if
+            g%zprev = zp
          end associate
       end do
    end subroutine tvv_apply
+
+   !-----------------------------------------------------------------------
+   !  Water volume at the gate's nodes resident on this rank,
+   !  sum(A*(DP + eta)) with lumped nodal areas A. Its change across
+   !  tvv_apply is the volume added or removed by the TVV update.
+   !-----------------------------------------------------------------------
+   real(8) function gate_volume(ig) result(v)
+      use MESH, only: DP
+      use GLOBAL, only: ETA2
+#ifdef CMPI
+      use MESSENGER, only: RESNODE
+#endif
+      integer, intent(in) :: ig
+      integer :: k
+      v = 0d0
+      associate (g => tvv_gates(ig))
+         do k = 1, g%npairs
+            v = v + node_volume(g%ltop(k), g%atop(k))
+            v = v + node_volume(g%lbed(k), g%abed(k))
+         end do
+      end associate
+   contains
+      real(8) function node_volume(nd, a)
+         integer, intent(in) :: nd
+         real(8), intent(in) :: a
+         node_volume = 0d0
+         if (nd <= 0) return
+#ifdef CMPI
+         if (.not. RESNODE(nd)) return
+#endif
+         !...a is half the sum of the attached element areas; the lumped area is a third of that sum
+         node_volume = (2d0/3d0)*a*(DP(nd) + ETA2(nd))
+      end function node_volume
+   end function gate_volume
+
+   !-----------------------------------------------------------------------
+   !  Log the end of a gate movement with the volume change caused by the
+   !  TVV update over the movement (zero up to round-off when the update
+   !  conserves volume)
+   !-----------------------------------------------------------------------
+   subroutine report_movement(ig, timeloc)
+      use SIZES, only: MYPROC
+      integer, intent(in) :: ig
+      real(8), intent(in) :: timeloc
+      real(8) :: dv(1)
+      character(1024) :: msg
+
+      associate (g => tvv_gates(ig))
+         dv(1) = g%dvol
+         call reduce_rsum(dv)
+         if (MYPROC == 0) then
+            write (msg, '(A,I0,A,ES14.7,A,ES14.7,A,ES14.7,A,ES11.4,A,I0,A,I0,A)') "TVV: gate ", ig, &
+               " moved from t = ", g%move_start, " s to ", timeloc, " s, now at crest ", g%zprev(1), &
+               " m; volume change by the TVV update: ", dv(1), " m^3; up to ", g%ncoupled, " of ", &
+               g%npairs, " pairs submerged (coupled) while moving"
+            call allMessage(INFO, trim(msg))
+         end if
+         g%moving = .false.
+         g%dvol = 0d0
+      end associate
+   end subroutine report_movement
+
+   !-----------------------------------------------------------------------
+   !  Volume-conserving water-level shift for gate ig after its crests moved
+   !  by dz(:) (one value per pair). Groups are the connected components of
+   !  the gate's wall-top and bed nodes, joined by submerged pairs and by
+   !  condensed node groups. Every rank builds the same groups from
+   !  rank-independent data and shifts its own copies of the nodes.
+   !-----------------------------------------------------------------------
+   subroutine shift_eta(ig, dz)
+      use MESH, only: DP
+      use BOUNDARIES, only: ISSUBMERGED64
+      use GLOBAL, only: ETA1, ETA2, H2, IFNLFA, CPRECOR
+      use GWCE, only: ETA0
+      integer, intent(in) :: ig
+      real(8), intent(in) :: dz(:)
+      integer :: k, m, n, np2, r
+      integer, allocatable :: coupled(:), root(:)
+      real(8), allocatable :: num(:), den(:)
+
+      associate (g => tvv_gates(ig))
+         n = g%npairs
+         np2 = 2*n
+         !...Pair coupling from the latest submergence flags, combined over ranks
+         allocate (coupled(n))
+         coupled = 0
+         do k = 1, n
+            if (g%etop(k) > 0) then
+               if (ISSUBMERGED64(g%etop(k)) /= 0) coupled(k) = 1
+            end if
+            if (g%ebed(k) > 0) then
+               if (ISSUBMERGED64(g%ebed(k)) /= 0) coupled(k) = 1
+            end if
+         end do
+         call reduce_imax(coupled)
+         g%ncoupled = max(g%ncoupled, count(coupled /= 0))
+
+         !...Connected components: index k = wall-top node of pair k,
+         !   n + k = bed node of pair k
+         allocate (root(np2))
+         root = [(m, m=1, np2)]
+         do k = 1, n
+            if (coupled(k) /= 0) call join(k, n + k)
+            do m = k + 1, n
+               if (g%cid(m) == g%cid(k)) call join(k, m)
+            end do
+         end do
+
+         !...Shift per component: sum(A_top*dz) / sum(A)
+         allocate (num(np2), den(np2))
+         num = 0d0
+         den = 0d0
+         do k = 1, n
+            r = find(k)
+            num(r) = num(r) + g%atop(k)*dz(k)
+            den(r) = den(r) + g%atop(k)
+            r = find(n + k)
+            den(r) = den(r) + g%abed(k)
+         end do
+         do k = 1, n
+            call shift_node(g%ltop(k), num(find(k))/den(find(k)))
+            call shift_node(g%lbed(k), num(find(n + k))/den(find(n + k)))
+         end do
+      end associate
+
+   contains
+
+      recursive integer function find(i) result(ri)
+         integer, intent(in) :: i
+         if (root(i) == i) then
+            ri = i
+         else
+            root(i) = find(root(i))
+            ri = root(i)
+         end if
+      end function find
+
+      subroutine join(i, j)
+         integer, intent(in) :: i, j
+         integer :: ri, rj
+         ri = find(i)
+         rj = find(j)
+         if (ri /= rj) root(max(ri, rj)) = min(ri, rj)
+      end subroutine join
+
+      subroutine shift_node(nd, deta)
+         integer, intent(in) :: nd
+         real(8), intent(in) :: deta
+         if (nd <= 0 .or. deta == 0d0) return
+         ETA2(nd) = ETA2(nd) + deta
+         ETA1(nd) = ETA1(nd) + deta
+         if (CPRECOR .and. allocated(ETA0)) ETA0(nd) = ETA0(nd) + deta
+         H2(nd) = DP(nd) + dble(IFNLFA)*ETA2(nd)
+      end subroutine shift_node
+
+   end subroutine shift_eta
+
+   !-----------------------------------------------------------------------
+   !  Data for the water-level shift that must be the same on every rank:
+   !  nodal areas (computed where the node is resident, so that all its
+   !  elements are present), condensed group of each wall-top node, and the
+   !  crest at the start of the run.
+   !-----------------------------------------------------------------------
+   subroutine init_coupling()
+      use WETDRY, only: computeTotAreaAtNode
+      use NodalAttributes, only: LoadCondensedNodes, NListCondensedNodes, &
+                                 NNodesListCondensedNodes, ListCondensedNodes
+#ifdef CMPI
+      use MESSENGER, only: RESNODE
+#endif
+      integer :: ig, k, j, m, nd
+      integer, allocatable :: negcid(:)
+
+      do ig = 1, n_tvv_gates
+         associate (g => tvv_gates(ig))
+            allocate (g%atop(g%npairs), g%abed(g%npairs), g%cid(g%npairs), g%zprev(g%npairs))
+            g%atop = 0d0
+            g%abed = 0d0
+            do k = 1, g%npairs
+               if (resident(g%ltop(k))) g%atop(k) = computeTotAreaAtNode(g%ltop(k))
+               if (resident(g%lbed(k))) g%abed(k) = computeTotAreaAtNode(g%lbed(k))
+            end do
+            call reduce_rmax(g%atop)
+            call reduce_rmax(g%abed)
+
+            !...Condensed group id: smallest fulldomain node number in the group
+            allocate (negcid(g%npairs))
+            negcid = -g%gtop
+            if (LoadCondensedNodes) then
+               do k = 1, g%npairs
+                  nd = g%ltop(k)
+                  if (nd <= 0) cycle
+                  do j = 1, NListCondensedNodes
+                     if (.not. any(ListCondensedNodes(j, 1:NNodesListCondensedNodes(j)) == nd)) cycle
+                     do m = 1, NNodesListCondensedNodes(j)
+                        negcid(k) = max(negcid(k), -global_node(ListCondensedNodes(j, m)))
+                     end do
+                  end do
+               end do
+            end if
+            call reduce_imax(negcid)
+            g%cid = -negcid
+            deallocate (negcid)
+
+            !...Crest at the start of the run (step 5 sets it for hot start)
+            g%zprev = max(g%zc0, g%zmin)
+         end associate
+      end do
+
+   contains
+
+      logical function resident(nd)
+         integer, intent(in) :: nd
+         resident = nd > 0
+#ifdef CMPI
+         if (resident) resident = RESNODE(nd)
+#endif
+      end function resident
+
+   end subroutine init_coupling
 
    !-----------------------------------------------------------------------
    !  Crest elevation of gate ig at time timeloc: linear interpolation of
@@ -806,6 +1060,17 @@ contains
       if (size(a) > 0) call MPI_Allreduce(MPI_IN_PLACE, a, size(a), MPI_INTEGER, MPI_MAX, COMM)
 #endif
    end subroutine reduce_imax
+
+   subroutine reduce_rsum(a)
+#ifdef CMPI
+      use mpi_f08, only: MPI_Allreduce, MPI_IN_PLACE, MPI_DOUBLE_PRECISION, MPI_SUM
+      use GLOBAL, only: COMM
+#endif
+      real(8), intent(inout) :: a(:)
+#ifdef CMPI
+      if (size(a) > 0) call MPI_Allreduce(MPI_IN_PLACE, a, size(a), MPI_DOUBLE_PRECISION, MPI_SUM, COMM)
+#endif
+   end subroutine reduce_rsum
 
    subroutine reduce_rmax(a)
 #ifdef CMPI
