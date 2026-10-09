@@ -43,6 +43,7 @@ module mod_tvv
 
    real(8), parameter :: TVV_NULL = -99999d0
    real(8), parameter :: TVV_DEFAULT_RADIUS = 1d-6 !...m, used when no radius is given
+   real(8), parameter :: TVV_TOL = 1d-6 !...m, tolerance of the startup consistency checks
 
    !...A gate: VEW pairs that follow one crest table
    type :: t_tvv_gate
@@ -58,6 +59,7 @@ module mod_tvv
       integer, allocatable :: etop(:), ebed(:) !...local IBTYPE=64 boundary entries with NBV = top / bed (0 = none)
       real(8), allocatable :: delta(:) !...m, crest minus wall-top elevation
       real(8), allocatable :: zmin(:) !...m, lowest crest: bed elevation + delta
+      real(8), allocatable :: zc0(:) !...m, crest in fort.14 (BARINHT)
    end type t_tvv_gate
 
    logical, public :: tvv_active = .false.
@@ -105,7 +107,7 @@ contains
       integer, allocatable :: line_gate(:), line_no(:)
       character(len=1024), allocatable :: line_table(:)
       integer, allocatable :: gtop(:), gbed(:)
-      real(8), allocatable :: delta(:), zbed(:)
+      real(8), allocatable :: delta(:), zbed(:), zc0(:)
 
       if (.not. found_tvw_nml) return
 
@@ -113,10 +115,11 @@ contains
                           line_table, line_gate, line_no)
       if (nlines == 0) return
 
-      call locate_pairs(nlines, xq, yq, rq, line_no, gtop, gbed, delta, zbed)
-      call build_gates(nlines, line_gate, line_no, gtop, gbed, delta, zbed)
+      call locate_pairs(nlines, xq, yq, rq, line_no, gtop, gbed, delta, zbed, zc0)
+      call build_gates(nlines, line_gate, line_no, gtop, gbed, delta, zbed, zc0)
       call read_tables()
       call log_gates()
+      call check_startup()
 
       tvv_active = n_tvv_gates > 0
 
@@ -271,14 +274,14 @@ contains
    !  IBTYPE=64 boundary entries within the search radius; the ranks then
    !  agree on one pair per line through fulldomain node numbers.
    !-----------------------------------------------------------------------
-   subroutine locate_pairs(nlines, xq, yq, rq, line_no, gtop, gbed, delta, zbed)
+   subroutine locate_pairs(nlines, xq, yq, rq, line_no, gtop, gbed, delta, zbed, zc0)
       use MESH, only: X, Y, DP
       use BOUNDARIES, only: NVEL, LBCODEI, NBV, IBCONN, BARINHT
       integer, intent(in) :: nlines
       real(8), intent(in) :: xq(:), yq(:), rq(:)
       integer, intent(in) :: line_no(:)
       integer, allocatable, intent(out) :: gtop(:), gbed(:)
-      real(8), allocatable, intent(out) :: delta(:), zbed(:)
+      real(8), allocatable, intent(out) :: delta(:), zbed(:), zc0(:)
 
       integer, allocatable :: plo(:), phi(:), mlo(:), mhi(:), seen1(:), seen2(:), flag(:)
       integer :: l, i, n1, n2, g1, g2, lo, hi, top, bed
@@ -286,7 +289,7 @@ contains
       character(1024) :: msg
 
       allocate (plo(nlines), phi(nlines), seen1(nlines), seen2(nlines), flag(nlines))
-      allocate (gtop(nlines), gbed(nlines), delta(nlines), zbed(nlines))
+      allocate (gtop(nlines), gbed(nlines), delta(nlines), zbed(nlines), zc0(nlines))
       plo = 0
       phi = 0
       seen1 = 0
@@ -367,6 +370,7 @@ contains
       gtop = 0
       delta = -huge(1d0)
       zbed = -huge(1d0)
+      zc0 = -huge(1d0)
       do l = 1, nlines
          n1 = local_node(mlo(l))
          n2 = local_node(mhi(l))
@@ -383,10 +387,12 @@ contains
          gtop(l) = global_node(top)
          delta(l) = BARINHT(i) - (-DP(top))
          zbed(l) = -DP(bed)
+         zc0(l) = BARINHT(i)
       end do
       call reduce_imax(gtop)
       call reduce_rmax(delta)
       call reduce_rmax(zbed)
+      call reduce_rmax(zc0)
       do l = 1, nlines
          if (gtop(l) == 0) then
             write (msg, '(A,I0,A)') "TVV: entry ", line_no(l), &
@@ -417,10 +423,10 @@ contains
    !  Fill the gates with their pairs and the local node and boundary-entry
    !  numbers of each pair (0 where this subdomain does not have them).
    !-----------------------------------------------------------------------
-   subroutine build_gates(nlines, line_gate, line_no, gtop, gbed, delta, zbed)
+   subroutine build_gates(nlines, line_gate, line_no, gtop, gbed, delta, zbed, zc0)
       integer, intent(in) :: nlines
       integer, intent(in) :: line_gate(:), line_no(:), gtop(:), gbed(:)
-      real(8), intent(in) :: delta(:), zbed(:)
+      real(8), intent(in) :: delta(:), zbed(:), zc0(:)
 
       integer :: ig, l, k, m
       character(1024) :: msg
@@ -441,6 +447,7 @@ contains
             g%npairs = count(line_gate(1:nlines) == ig)
             allocate (g%gtop(g%npairs), g%gbed(g%npairs), g%ltop(g%npairs), g%lbed(g%npairs))
             allocate (g%etop(g%npairs), g%ebed(g%npairs), g%delta(g%npairs), g%zmin(g%npairs))
+            allocate (g%zc0(g%npairs))
             k = 0
             do l = 1, nlines
                if (line_gate(l) /= ig) cycle
@@ -449,6 +456,7 @@ contains
                g%gbed(k) = gbed(l)
                g%delta(k) = delta(l)
                g%zmin(k) = zbed(l) + delta(l)
+               g%zc0(k) = zc0(l)
                g%ltop(k) = max(local_node(gtop(l)), 0)
                g%lbed(k) = max(local_node(gbed(l)), 0)
                g%etop(k) = 0
@@ -505,6 +513,105 @@ contains
       end do
 
    end subroutine read_tables
+
+   !-----------------------------------------------------------------------
+   !  Startup consistency checks (design note, Decision 1-3; input-format
+   !  note 4.2). Stops the run on an inconsistency.
+   !-----------------------------------------------------------------------
+   subroutine check_startup()
+      use GLOBAL, only: ILUMP, IHOT, STATIM, TVV_DELTA
+      use MESH, only: NP, DP
+      use NodalAttributes, only: Tau0, LoadTau0, Tau0DefVal, LoadCondensedNodes, &
+                                 NListCondensedNodes, NNodesListCondensedNodes, ListCondensedNodes
+      integer :: ig, k, m, n, n1
+      integer, allocatable :: topgate(:), toppair(:)
+      real(8) :: zc
+      character(1024) :: msg
+
+      !...The GWCE left-hand side and TAU0 must not depend on DP
+      if (ILUMP == 0) then
+         call terminate(exit_code=ADCIRC_EXIT_FAILURE, message="TVV: time-varying crest VEWs "// &
+                        "need a lumped GWCE mass matrix (ILump=1); a consistent mass matrix is not supported yet.")
+      end if
+      if ((.not. LoadTau0 .and. Tau0 < 0d0) .or. (LoadTau0 .and. Tau0DefVal < 0d0)) then
+         call terminate(exit_code=ADCIRC_EXIT_FAILURE, message="TVV: time-varying crest VEWs "// &
+                        "need a constant or prescribed TAU0; depth-dependent or time-varying TAU0 (TAU0 < 0) "// &
+                        "is not supported yet.")
+      end if
+
+      do ig = 1, n_tvv_gates
+         associate (g => tvv_gates(ig))
+            do k = 1, g%npairs
+               write (msg, '(A,I0,A,I0,A,I0,A)') "TVV: gate ", ig, ", pair ", g%gtop(k), "/", g%gbed(k), ":"
+               !...delta: positive, and equal to TVV_DELTA when it is given
+               if (is_null(TVV_DELTA)) then
+                  if (g%delta(k) <= 0d0) then
+                     write (msg, '(A,ES12.5,A)') trim(msg)//" crest minus wall-top elevation is ", &
+                        g%delta(k), " m; it must be positive."
+                     call terminate(exit_code=ADCIRC_EXIT_FAILURE, message=trim(msg))
+                  end if
+               elseif (abs(g%delta(k) - TVV_DELTA) > TVV_TOL) then
+                  write (msg, '(A,ES12.5,A,ES12.5,A)') trim(msg)//" crest minus wall-top elevation is ", &
+                     g%delta(k), " m, but TVV_DELTA = ", TVV_DELTA, " m."
+                  call terminate(exit_code=ADCIRC_EXIT_FAILURE, message=trim(msg))
+               end if
+               !...Cold start: the crest table must start at the fort.14 crest
+               if (IHOT == 0) then
+                  zc = tvv_crest_at(ig, STATIM*86400d0)
+                  if (abs(zc - g%zc0(k)) > TVV_TOL) then
+                     write (msg, '(A,ES12.5,A,ES12.5,A)') trim(msg)//" the crest table gives ", zc, &
+                        " m at the start of the run, but the fort.14 crest is ", g%zc0(k), " m."
+                     call terminate(exit_code=ADCIRC_EXIT_FAILURE, message=trim(msg))
+                  end if
+               end if
+            end do
+            !...Table values below a pair's lowest crest (bed + delta) will be clamped
+            if (minval(g%z) < maxval(g%zmin) - TVV_TOL) then
+               write (msg, '(A,I0,A,ES12.5,A,ES12.5,A)') "TVV: gate ", ig, ": the crest table goes down to ", &
+                  minval(g%z), " m, below the lowest crest (bed + delta) of some pairs (up to ", &
+                  maxval(g%zmin), " m); the crest will be clamped there."
+               call allMessage(WARNING, trim(msg))
+            end if
+         end associate
+      end do
+
+      !...Condensed node groups that contain a wall-top node must consist of
+      !   wall-top nodes of one gate with the same DP and delta, so that they
+      !   stay level as the gate moves
+      if (.not. LoadCondensedNodes) return
+      allocate (topgate(NP), toppair(NP))
+      topgate = 0
+      toppair = 0
+      do ig = 1, n_tvv_gates
+         do k = 1, tvv_gates(ig)%npairs
+            n = tvv_gates(ig)%ltop(k)
+            if (n > 0) then
+               topgate(n) = ig
+               toppair(n) = k
+            end if
+         end do
+      end do
+      do k = 1, NListCondensedNodes
+         n1 = ListCondensedNodes(k, 1)
+         if (all(topgate(ListCondensedNodes(k, 1:NNodesListCondensedNodes(k))) == 0)) cycle
+         do m = 1, NNodesListCondensedNodes(k)
+            n = ListCondensedNodes(k, m)
+            if (topgate(n) == 0 .or. topgate(n) /= topgate(n1) .or. &
+                abs(DP(n) - DP(n1)) > TVV_TOL) then
+               write (msg, '(A,I0,A)') "TVV: condensed node group ", k, " mixes wall-top nodes of a "// &
+                  "time-varying crest gate with other nodes, or its nodes have different depths."
+               call terminate(exit_code=ADCIRC_EXIT_FAILURE, message=trim(msg))
+            end if
+            if (abs(tvv_gates(topgate(n))%delta(toppair(n)) - &
+                    tvv_gates(topgate(n1))%delta(toppair(n1))) > TVV_TOL) then
+               write (msg, '(A,I0,A)') "TVV: condensed node group ", k, &
+                  " has wall-top nodes with different crest offsets (delta)."
+               call terminate(exit_code=ADCIRC_EXIT_FAILURE, message=trim(msg))
+            end if
+         end do
+      end do
+
+   end subroutine check_startup
 
    !-----------------------------------------------------------------------
    subroutine log_gates()
