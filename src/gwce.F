@@ -1970,7 +1970,10 @@ C.... CONDENSED NODES: Summing up the values at condensed nodes
 #ifdef CMPI
       IF ((NFLUXIB64_GBL.GT.0.OR.LoadCondensedNodes)
      &    .AND.(ILump.NE.0)) THEN
-         CALL UPDATER(COEFDTemp,GWCE_LV,DUMY1,2)
+C        ETA1 is included: the VEW and condensed-node loops above average
+C        it over coupled nodes, but only on subdomains that hold the whole
+C        group. Every copy must match its owner before the copy-back below.
+         CALL UPDATER(COEFDTemp,GWCE_LV,ETA1,3)
       ENDIF
 #endif      
       
@@ -2005,13 +2008,6 @@ C     VEW: Copy values from back side to front side
             END SELECT
          ENDDO
       ENDIF
-#ifdef CMPI
-C     VEW: ETA1 was averaged across coupled pairs above, but only on the
-C     subdomains that hold the pair. Make every ghost copy match its owner.
-      IF((NFLUXIB64_GBL.GT.0).AND.(ILump.NE.0)) THEN
-         CALL UPDATER(ETA1,DUMY1,DUMY1,1)
-      ENDIF
-#endif
 C..>>
 
       IF (ILump.eq.0) THEN ! default, fully consistent LHS
