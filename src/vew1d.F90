@@ -182,7 +182,7 @@ contains
       logical :: DO_ROTATE
 
       if (.not. LoadCondensedNodes) return
-      if (.not. NCondensedNodes(IND) /= 2) return
+      if (NCondensedNodes(IND) /= 2) return
 
       IBND = LBArray_Pointer(IND)
       if (IBND <= 0) return
