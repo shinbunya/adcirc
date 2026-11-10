@@ -254,9 +254,10 @@ contains
 !> @brief Apply all flux boundary conditions
 !>
 !> Computes the per-timestep forcing state (fort.20 snapshot advance,
-!> periodic constituent arguments, river radiation elevation capture), then
-!> visits each flow boundary segment once and applies the treatment for its
-!> boundary type. Subdomain boundary data is applied last.
+!> periodic constituent arguments, river radiation elevation capture) and
+!> the submergence state of all vertical element walls, then visits each
+!> flow boundary segment once and applies the treatment for its boundary
+!> type. Subdomain boundary data is applied last.
 !>
 !> @param[in] IT      Current timestep number
 !> @param[in] TimeLoc Current simulation time (seconds)
@@ -267,7 +268,7 @@ contains
                         QTIME1, FTIMINC, FluxSettlingIT, EtaDisc, Eta2, &
                         NIBNODECODE
       use mesh, only: NP
-      use boundaries, only: NBOU, NVELL, IBTYPE, NFLUXF, NFLUXIB
+      use boundaries, only: NBOU, NVELL, IBTYPE, NFLUXF, NFLUXIB, NFLUXIB64
       use subdomain, only: subdomainOn
       implicit none
 
@@ -310,6 +311,8 @@ contains
       end if
 
       if (NFLUXIB == 1) NIBNODECODE(:) = 0
+
+      if (NFLUXIB64 == 1) call setVewSubmergence(TimeLoc)
 
       I = 0
       do K = 1, NBOU
@@ -507,11 +510,44 @@ contains
    !-----------------------------------------------------------------------
 
 !-----------------------------------------------------------------------
+!> @brief Submergence state of all vertical element walls
+!>
+!> Sets the submergence flags (ISSUBMERGED64) from the front side of every
+!> vertical element wall barrier segment (LBCODE=64), which also sets the
+!> paired back side flags. This runs for all segments before any wall flux
+!> is computed: with VEW_CREST_HYDRAULICS, a pair that leaves coupled mode
+!> shifts the water levels of its whole coupled group (SPLIT_PAIR_LEVELS),
+!> which can include nodes of other segments.
+!>
+!> @param[in] TimeLoc Current simulation time (seconds)
+!-----------------------------------------------------------------------
+   subroutine setVewSubmergence(TimeLoc)
+      use boundaries, only: NBOU, NVELL, IBTYPE
+      use WEIR_FLUX, only: SET_SUBMERGED64_AT
+      implicit none
+
+      real(8), intent(in) :: TimeLoc
+      integer :: I, J, K
+
+      I = 0
+      do K = 1, NBOU
+         if (IBTYPE(K) == 64) then
+            do J = 1, NVELL(K)
+               call SET_SUBMERGED64_AT(I + J, J, K, TimeLoc)
+            end do
+         end if
+         I = I + segmentNodeCount(IBTYPE(K), NVELL(K))
+      end do
+
+   end subroutine setVewSubmergence
+   !-----------------------------------------------------------------------
+
+!-----------------------------------------------------------------------
 !> @brief Vertical element wall flux on one boundary segment
 !>
-!> Sets the submergence flags (ISSUBMERGED64) from the front side of a
-!> vertical element wall barrier (LBCODE=64), which also sets the paired
-!> back side flags, then computes the normal flow (QN2) on both sides.
+!> Computes the normal flow (QN2) on both sides of a vertical element wall
+!> barrier (LBCODE=64). The submergence flags are set beforehand for all
+!> segments by setVewSubmergence.
 !>
 !> @param[in] K       Boundary segment number
 !> @param[in] I0      Flow boundary index before the segment
@@ -520,16 +556,12 @@ contains
 !-----------------------------------------------------------------------
    subroutine vewBarrierSegment(K, I0, N, TimeLoc)
       use global, only: QN2
-      use WEIR_FLUX, only: SET_SUBMERGED64_AT, COMPUTE_INTERNAL_BOUNDARY64_FLUX
+      use WEIR_FLUX, only: COMPUTE_INTERNAL_BOUNDARY64_FLUX
       implicit none
 
       integer, intent(in) :: K, I0, N
       real(8), intent(in) :: TimeLoc
       integer :: I, J
-
-      do J = 1, N
-         call SET_SUBMERGED64_AT(I0 + J, J, K, TimeLoc)
-      end do
 
       do J = 1, 2*N
          I = I0 + J
