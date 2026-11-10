@@ -90,6 +90,7 @@ contains
       use mod_baroclinic, only: computeBaroclinicPressureGradient, updateBaroclinicBoundaryConditions
       use mod_flux_boundaries, only: applyFluxBoundaryConditions
       use mod_transport_2d, only: SCALAR_TRANS_2D
+      use MOD_TVV, only: tvv_apply
 
       implicit none
       integer, intent(in) :: IT
@@ -103,6 +104,9 @@ contains
       call computeRampFunctions(IT, TimeLoc)
       call shiftTimeLevels(IT)
       call updateAbsorbingLayerBoundary(TimeLoc, TimeH)
+      ! time-varying crest VEWs: move the gates to their position at TimeLoc (crest and
+      ! wall-top depth), before any use of DP in this time step
+      call tvv_apply(TimeLoc)
       if (NDDT /= 0) call updateTimeDependentBathymetry(TimeLoc)
       call computeBottomFriction(IT)
       call updateIceFields(TimeLoc)

@@ -125,7 +125,7 @@ C.....for matrix conditioning,global to allow for reading in from hotstart file
 
       character(len=256) :: scratchMessage
 
-      public :: initGWCE, solveGWCE, a00, b00, c00, convcr, isldia,
+      public :: initGWCE, solveGWCE, a00, b00, c00, convcr, isldia, eta0,
      &          itmax, invertedBarometerOnElevationBoundary, etiminc,
      &          etime1, etime2, numitr, gwce_lv_reset
 
