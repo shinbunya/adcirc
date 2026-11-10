@@ -91,6 +91,7 @@ contains
       use mod_flux_boundaries, only: applyFluxBoundaryConditions
       use mod_transport_2d, only: SCALAR_TRANS_2D
       use MOD_TVV, only: tvv_apply
+      use VEW1D, only: COMPUTE_VEW_ADVECT_VELOCITY
 
       implicit none
       integer, intent(in) :: IT
@@ -124,6 +125,8 @@ contains
 
          call applyFluxBoundaryConditions(IT, TimeLoc, TimeH)
 
+         ! velocities for the advective terms (recovered at coupled VEW pairs if enabled)
+         call COMPUTE_VEW_ADVECT_VELOCITY()
          call solveGWCE(it, ITIME_BGN, timeloc, timeh)
 
          call applyWettingAndDrying(IT)
