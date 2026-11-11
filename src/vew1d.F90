@@ -35,7 +35,9 @@ module vew1d
    public :: ROTATE_AT_CONDENSEDNODES_ALL, ROTATEBACK_AT_CONDENSEDNODES_ALL, &
              REMOVE_NORMAL_AT_CONDENSEDNODES, GET_STREAMDIRECTION_AT_ELEMENT, &
              COMPUTE_VEW_ADVECT_VELOCITY, UADV, VADV, &
-             VEW_ADVECT_FR_ATTACH, VEW_ADVECT_FR_FULL, VEW1D_ROTATE_VELOCITY
+             VEW_ADVECT_FR_ATTACH, VEW_ADVECT_FR_FULL, VEW1D_ROTATE_VELOCITY, &
+             SETUP_COUPLED_GROUPS, UPDATE_ACTIVE_GROUPS, GROUP_LOAD_SUM, GROUP_COPY_INCREMENT, &
+             GROUP_SLOT, NSGROUPS, ISSGMEMBER, SGELEM, GMAP, NeiTabG, NNeighG
 
    !...VEW1D_ROTATE_VELOCITY (VEW1DChannelControl, default off): rotate the element velocities and
    !   fluxes at two-node condensed groups along uncoupled VEW or land boundaries to the stream
@@ -43,6 +45,27 @@ module vew1d
    !   treatments (rotate-back and removal of the normal component of the momentum load, wind stress
    !   and Coriolis) do not depend on it.
    logical :: VEW1D_ROTATE_VELOCITY = .false.
+
+   !...Coupled groups for the consistent-mass GWCE (ILump = 0). Nodes that share one water level
+   !   (VEW pairs in Case 1 with both nodes wet, wet members of a condensed node group, and chains of
+   !   these) get one unknown: every element matrix is assembled at the rows and columns of the
+   !   group representatives (GMAP), which gives P^T K P, the members' loads are summed to the
+   !   representative and its increment is copied back to the members after JCG.
+   !   Static groups: connected sets under all IBTYPE=64 pairs and all condensed groups, i.e. every
+   !   coupling that can become active. NeiTabG/NNeighG is the neighbour table of the GWCE matrix:
+   !   NeiTab plus, for each static member, the other members and all members' neighbours, and for
+   !   each of those neighbours, all members. Without static groups it is a copy of NeiTab.
+   !   Formulation: docs/reports/vew-explicit-and-implicit-formulation (operable-structure project).
+   integer :: NSGROUPS = 0                      ! number of static groups
+   logical, allocatable :: ISSGMEMBER(:)        ! node belongs to a static group
+   logical, allocatable :: SGELEM(:)            ! element has a node in a static group
+   integer, allocatable :: GMAP(:)              ! representative of the node's active group
+   integer, allocatable :: GMAPPREV(:)          ! GMAP of the previous step
+   integer, allocatable :: SGMEMBERS(:)         ! static members
+   integer, allocatable :: NeiTabG(:, :), NNeighG(:)
+   integer, allocatable :: GPARENT(:)           ! union-find work array
+   real(8), allocatable :: GSUM(:)              ! work array for the group sums
+   integer, allocatable :: GCNT(:)
 
    !...Recovered crest velocity at coupled (submerged) IBTYPE=64 VEW node pairs, on with
    !   VEW_CREST_HYDRAULICS (WEIR module, VEW1DChannelControl namelist). A coupled pair shares one
@@ -711,5 +734,343 @@ contains
          CONDENSED_GROUP = -CondensedNodes(N, 1)
       end if
    end function CONDENSED_GROUP
+
+   !-------------------------------------------------------------
+   !  SETUP_COUPLED_GROUPS: static groups and the GWCE neighbour table for the consistent-mass GWCE.
+   !  Called once from READ_INPUT (ILump = 0), after the mesh, the boundaries and the condensed node
+   !  groups are set up and before the GWCE matrix is allocated. Sets MNEIG, the number of columns of
+   !  COEF.
+   !-------------------------------------------------------------
+   subroutine SETUP_COUPLED_GROUPS()
+      use SIZES, only: MNP, MNEI, MNEIG
+      use MESH, only: NP, NE, NM, NeiTab, NNeigh
+      use BOUNDARIES, only: NVEL, NBV, IBCONN, LBCODEI
+      use NodalAttributes, only: LoadCondensedNodes, NListCondensedNodes, &
+                                 NNodesListCondensedNodes, ListCondensedNodes
+      use mod_logging, only: allMessage, INFO
+      implicit none
+      integer :: I, J, K, L, N, R, NMEM, NCOL, IE
+      integer, allocatable :: ROOT(:), SIZEOF(:), FIRST(:), NEXT(:)
+      integer, allocatable :: TAB(:, :), CNT(:), UNION(:)
+      integer :: NU
+      character(len=256) :: MSG
+
+      allocate (GPARENT(NP), GMAP(NP), GMAPPREV(NP), ISSGMEMBER(NP), GSUM(NP), GCNT(NP))
+      allocate (SGELEM(NE))
+      do I = 1, NP
+         GPARENT(I) = I
+         GMAP(I) = I
+      end do
+      GMAPPREV = 0
+      ISSGMEMBER = .false.
+      SGELEM = .false.
+
+      !...static groups: all IBTYPE=64 pairs and all condensed groups
+      do I = 1, NVEL
+         if (LBCODEI(I) /= 64) cycle
+         if (NBV(I) <= 0 .or. IBCONN(I) <= 0) cycle
+         call GJOIN(NBV(I), IBCONN(I))
+      end do
+      if (LoadCondensedNodes) then
+         do K = 1, NListCondensedNodes
+            if (ListCondensedNodes(K, 1) == 0) cycle
+            do L = 2, NNodesListCondensedNodes(K)
+               call GJOIN(ListCondensedNodes(K, 1), ListCondensedNodes(K, L))
+            end do
+         end do
+      end if
+
+      allocate (ROOT(NP), SIZEOF(NP), FIRST(NP), NEXT(NP))
+      SIZEOF = 0
+      do I = 1, NP
+         ROOT(I) = GFIND(I)
+         SIZEOF(ROOT(I)) = SIZEOF(ROOT(I)) + 1
+      end do
+      !...member lists per group, in increasing node order (FIRST(root) -> NEXT)
+      FIRST = 0
+      NEXT = 0
+      NMEM = 0
+      NSGROUPS = 0
+      do I = NP, 1, -1
+         R = ROOT(I)
+         if (SIZEOF(R) < 2) cycle
+         NEXT(I) = FIRST(R)
+         FIRST(R) = I
+         ISSGMEMBER(I) = .true.
+         NMEM = NMEM + 1
+      end do
+      do I = 1, NP
+         if (SIZEOF(I) >= 2 .and. ROOT(I) == I) NSGROUPS = NSGROUPS + 1
+      end do
+      allocate (SGMEMBERS(NMEM))
+      NMEM = 0
+      do I = 1, NP
+         if (ISSGMEMBER(I)) then
+            NMEM = NMEM + 1
+            SGMEMBERS(NMEM) = I
+         end if
+      end do
+      do I = 1, NP
+         GPARENT(I) = I
+      end do
+
+      !...GWCE neighbour table
+      if (NSGROUPS == 0) then
+         MNEIG = MNEI
+         allocate (NeiTabG(MNP, MNEIG), NNeighG(MNP))
+         NeiTabG = NeiTab
+         NNeighG = NNeigh
+         return
+      end if
+
+      allocate (CNT(NP), UNION(NP))
+      allocate (TAB(NP, MNEI + 8))
+      TAB = 0
+      do I = 1, NP
+         CNT(I) = NNeigh(I)
+         TAB(I, 1:NNeigh(I)) = NeiTab(I, 1:NNeigh(I))
+      end do
+      do R = 1, NP
+         if (FIRST(R) == 0) cycle
+         !...UNION: the members and all their neighbours
+         NU = 0
+         I = FIRST(R)
+         do while (I /= 0)
+            call ADDUNIQUE(UNION, NU, I)
+            do J = 1, NNeigh(I)
+               call ADDUNIQUE(UNION, NU, NeiTab(I, J))
+            end do
+            I = NEXT(I)
+         end do
+         do K = 1, NU
+            N = UNION(K)
+            if (ISSGMEMBER(N) .and. ROOT(N) == R) then
+               !...a member lists the whole union
+               do L = 1, NU
+                  call ADDTAB(N, UNION(L))
+               end do
+            else
+               !...a neighbour lists all members
+               I = FIRST(R)
+               do while (I /= 0)
+                  call ADDTAB(N, I)
+                  I = NEXT(I)
+               end do
+            end if
+         end do
+      end do
+      NCOL = maxval(CNT)
+      MNEIG = max(MNEI, NCOL)
+      allocate (NeiTabG(MNP, MNEIG), NNeighG(MNP))
+      NeiTabG = 0
+      NNeighG = 0
+      do I = 1, NP
+         NNeighG(I) = CNT(I)
+         NeiTabG(I, 1:CNT(I)) = TAB(I, 1:CNT(I))
+         !...unused slots point to the node itself (zero coefficient)
+         NeiTabG(I, CNT(I) + 1:MNEIG) = I
+      end do
+      do IE = 1, NE
+         SGELEM(IE) = ISSGMEMBER(NM(IE, 1)) .or. ISSGMEMBER(NM(IE, 2)) .or. ISSGMEMBER(NM(IE, 3))
+      end do
+      deallocate (TAB, CNT, UNION, ROOT, SIZEOF, FIRST, NEXT)
+
+      write (MSG, '(a,i0,a,i0,a,i0,a,i0,a)') "Consistent GWCE: ", NSGROUPS, &
+         " static coupled groups (VEW pairs and condensed nodes) with ", NMEM, &
+         " nodes; GWCE neighbour table width ", MNEIG, " (mesh table ", MNEI, ")."
+      call allMessage(INFO, trim(MSG))
+
+   contains
+
+      !...append V to row N of TAB unless present; widen TAB when full
+      subroutine ADDTAB(N, V)
+         integer, intent(IN) :: N, V
+         integer :: M
+         integer, allocatable :: TMP(:, :)
+         do M = 1, CNT(N)
+            if (TAB(N, M) == V) return
+         end do
+         if (CNT(N) == size(TAB, 2)) then
+            allocate (TMP(size(TAB, 1), 2*size(TAB, 2)))
+            TMP = 0
+            TMP(:, 1:size(TAB, 2)) = TAB
+            call move_alloc(TMP, TAB)
+         end if
+         CNT(N) = CNT(N) + 1
+         TAB(N, CNT(N)) = V
+      end subroutine ADDTAB
+
+      subroutine ADDUNIQUE(LIST, N, V)
+         integer, intent(INOUT) :: LIST(:)
+         integer, intent(INOUT) :: N
+         integer, intent(IN) :: V
+         integer :: M
+         do M = 1, N
+            if (LIST(M) == V) return
+         end do
+         N = N + 1
+         LIST(N) = V
+      end subroutine ADDUNIQUE
+
+   end subroutine SETUP_COUPLED_GROUPS
+
+   !-------------------------------------------------------------
+   !  UPDATE_ACTIVE_GROUPS: active groups of this step and their representatives (GMAP). Two nodes of
+   !  an IBTYPE=64 pair are joined if the pair is coupled (ISSUBMERGED64 /= 0) and both are wet, the
+   !  wet members of a condensed group are joined; the representative is the member with the lowest
+   !  node number. CHANGED is .true. if GMAP differs from the previous call's.
+   !-------------------------------------------------------------
+   subroutine UPDATE_ACTIVE_GROUPS(CHANGED)
+      use GLOBAL, only: NODECODE
+      use BOUNDARIES, only: NVEL, NBV, IBCONN, LBCODEI, ISSUBMERGED64
+      use NodalAttributes, only: LoadCondensedNodes, NListCondensedNodes, &
+                                 NNodesListCondensedNodes, ListCondensedNodes
+      implicit none
+      logical, intent(OUT) :: CHANGED
+      integer :: I, K, L, M, N1, N2, R
+
+      CHANGED = .false.
+      if (NSGROUPS == 0) return
+      do M = 1, size(SGMEMBERS)
+         I = SGMEMBERS(M)
+         GPARENT(I) = I
+      end do
+      do I = 1, NVEL
+         if (LBCODEI(I) /= 64) cycle
+         if (ISSUBMERGED64(I) == 0) cycle
+         N1 = NBV(I)
+         N2 = IBCONN(I)
+         if (N1 <= 0 .or. N2 <= 0) cycle
+         if (NODECODE(N1) == 0 .or. NODECODE(N2) == 0) cycle
+         call GJOIN(N1, N2)
+      end do
+      if (LoadCondensedNodes) then
+         do K = 1, NListCondensedNodes
+            N1 = 0
+            do L = 1, NNodesListCondensedNodes(K)
+               N2 = ListCondensedNodes(K, L)
+               if (N2 <= 0) cycle
+               if (NODECODE(N2) == 0) cycle
+               if (N1 == 0) then
+                  N1 = N2
+               else
+                  call GJOIN(N1, N2)
+               end if
+            end do
+         end do
+      end if
+      !...GJOIN keeps the smaller node as root, so the root is the lowest member
+      do M = 1, size(SGMEMBERS)
+         I = SGMEMBERS(M)
+         R = GFIND(I)
+         GMAP(I) = R
+         if (GMAP(I) /= GMAPPREV(I)) CHANGED = .true.
+         GMAPPREV(I) = GMAP(I)
+      end do
+   end subroutine UPDATE_ACTIVE_GROUPS
+
+   !-------------------------------------------------------------
+   !  GROUP_LOAD_SUM: sum the GWCE loads of each active group into its representative (zero at the
+   !  other members) and replace ETA1 of the members by the group mean, as the lumped GWCE does.
+   !  Sets the initial guess ETAS of the members other than the representative to zero.
+   !-------------------------------------------------------------
+   subroutine GROUP_LOAD_SUM(GWCE_LV, ETA1, ETAS)
+      implicit none
+      real(8), intent(INOUT) :: GWCE_LV(:), ETA1(:), ETAS(:)
+      integer :: I, M, R
+
+      if (NSGROUPS == 0) return
+      do M = 1, size(SGMEMBERS)
+         I = SGMEMBERS(M)
+         GSUM(GMAP(I)) = 0.d0
+         GCNT(GMAP(I)) = 0
+      end do
+      do M = 1, size(SGMEMBERS)
+         I = SGMEMBERS(M)
+         R = GMAP(I)
+         GSUM(R) = GSUM(R) + ETA1(I)
+         GCNT(R) = GCNT(R) + 1
+         if (R /= I) then
+            GWCE_LV(R) = GWCE_LV(R) + GWCE_LV(I)
+            GWCE_LV(I) = 0.d0
+            ETAS(I) = 0.d0
+         end if
+      end do
+      do M = 1, size(SGMEMBERS)
+         I = SGMEMBERS(M)
+         R = GMAP(I)
+         if (GCNT(R) > 1) ETA1(I) = GSUM(R)/dble(GCNT(R))
+      end do
+   end subroutine GROUP_LOAD_SUM
+
+   !-------------------------------------------------------------
+   !  GROUP_COPY_INCREMENT: after JCG, give the members of each active group the increment of its
+   !  representative.
+   !-------------------------------------------------------------
+   subroutine GROUP_COPY_INCREMENT(ETAS)
+      implicit none
+      real(8), intent(INOUT) :: ETAS(:)
+      integer :: I, M
+
+      if (NSGROUPS == 0) return
+      do M = 1, size(SGMEMBERS)
+         I = SGMEMBERS(M)
+         if (GMAP(I) /= I) ETAS(I) = ETAS(GMAP(I))
+      end do
+   end subroutine GROUP_COPY_INCREMENT
+
+   !-------------------------------------------------------------
+   !  GROUP_SLOT: column of node ICOL in row IROW of the GWCE matrix (NeiTabG), 0 if absent
+   !-------------------------------------------------------------
+   integer function GROUP_SLOT(IROW, ICOL)
+      implicit none
+      integer, intent(IN) :: IROW, ICOL
+      integer :: J
+      GROUP_SLOT = 0
+      if (IROW == ICOL) then
+         GROUP_SLOT = 1
+         return
+      end if
+      do J = 2, NNeighG(IROW)
+         if (NeiTabG(IROW, J) == ICOL) then
+            GROUP_SLOT = J
+            return
+         end if
+      end do
+   end function GROUP_SLOT
+
+   !-------------------------------------------------------------
+   !  union-find on GPARENT; the smaller node becomes the root
+   !-------------------------------------------------------------
+   integer function GFIND(N)
+      implicit none
+      integer, intent(IN) :: N
+      integer :: R, K, NX
+      R = N
+      do while (GPARENT(R) /= R)
+         R = GPARENT(R)
+      end do
+      K = N
+      do while (GPARENT(K) /= R)
+         NX = GPARENT(K)
+         GPARENT(K) = R
+         K = NX
+      end do
+      GFIND = R
+   end function GFIND
+
+   subroutine GJOIN(N1, N2)
+      implicit none
+      integer, intent(IN) :: N1, N2
+      integer :: R1, R2
+      R1 = GFIND(N1)
+      R2 = GFIND(N2)
+      if (R1 == R2) return
+      if (R1 < R2) then
+         GPARENT(R2) = R1
+      else
+         GPARENT(R1) = R2
+      end if
+   end subroutine GJOIN
 
 end module vew1d

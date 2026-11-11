@@ -321,8 +321,10 @@ Cobell - Added for Time Varying Weirs, Set to default values
       LOGICAL                      :: USE_TVW = .FALSE.     !..From namelist, used time varying weirs
       CHARACTER(80)                :: TVW_FILE = 'fort.tvw' !..From namelist, file for time varying weirs
       REAL(8),ALLOCATABLE,TARGET  :: TVW(:)                !..Current elevation of weirs, for output
-C     Time-varying crest VEW (TVV, VaryType=4): optional TVWControl
-C     settings, -99999 = unset
+C     Time-varying crest VEW (TVV, VaryType=4): a crest moved in this
+C     time step (the consistent GWCE matrix depends on DP); optional
+C     TVWControl settings, -99999 = unset
+      LOGICAL :: TVV_MOVED = .FALSE.
       REAL(8) :: TVV_DELTA = -99999.d0         !..Required crest minus wall-top elevation (m)
       REAL(8) :: TVV_SEARCH_RADIUS = -99999.d0 !..Default radius (m) for locating VEW pairs
 
