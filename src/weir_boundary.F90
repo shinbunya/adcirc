@@ -2858,12 +2858,10 @@ contains
       SW_ANY = .false.
       if (.not. WEIR_SEMI_IMPLICIT) return
       if (.not. allocated(SW_ACT)) then
-         !...consistent GWCE: the pair coupling enters the matrix, serial only for now
-         if (ILUMP == 0 .and. MNPROC > 1) call terminate(exit_code=ADCIRC_EXIT_FAILURE, &
-            message="WEIR_SEMI_IMPLICIT with the consistent GWCE (ILump = 0) is serial only for now")
-         !...in parallel runs for IBTYPE 4/24 only for now: an IBTYPE=64 pair's coupled group (condensed
-         !   wall top and coupled feet) can be split between subdomains
-         if (MNPROC > 1 .and. NFLUXIB64_GBL > 0) call terminate(exit_code=ADCIRC_EXIT_FAILURE, &
+         !...lumped GWCE: in parallel runs for IBTYPE 4/24 only for now: an IBTYPE=64 pair's coupled
+         !   group (condensed wall top and coupled feet) can be split between subdomains. The
+         !   consistent GWCE needs whole groups, which adcprep provides for it.
+         if (MNPROC > 1 .and. NFLUXIB64_GBL > 0 .and. ILUMP /= 0) call terminate(exit_code=ADCIRC_EXIT_FAILURE, &
             message="WEIR_SEMI_IMPLICIT is serial only for now on meshes with IBTYPE=64 boundaries")
          if (CPRECOR) call terminate(exit_code=ADCIRC_EXIT_FAILURE, &
             message="WEIR_SEMI_IMPLICIT does not support the predictor-corrector GWCE yet")

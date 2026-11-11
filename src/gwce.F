@@ -121,7 +121,7 @@ C.....for matrix conditioning,global to allow for reading in from hotstart file
 !     Allocates arrays and initializes constants.
 !----------------------------------------------------------------------
       subroutine initGWCE()
-      use sizes, only : mnp, mnproc
+      use sizes, only : mnp
       use global, only : dt, ilump, alloc_main11, alloc_main11_lumped,
      &   CPRECOR, NPERSEG
       USE ADC_CONSTANTS, only: g
@@ -131,7 +131,7 @@ C.....for matrix conditioning,global to allow for reading in from hotstart file
       use mod_logging, only: log_unit
       use mod_terminate, only: terminate, ADCIRC_EXIT_FAILURE
       use subdomain, only : subdomainOn
-      use vew1d, only : NSGROUPS, ISSGMEMBER
+      use vew1d, only : NSGROUPS, NSGROUPS_GBL, ISSGMEMBER, GROUP_IMAX
       implicit none
       integer :: i
 
@@ -144,11 +144,11 @@ C.....for matrix conditioning,global to allow for reading in from hotstart file
       ga00=g*a00
 
 C     Coupled groups (VEW pairs, condensed nodes) in the consistent GWCE:
-C     combinations that are not supported yet
+C     whether any rank has groups (all ranks then take the group branches,
+C     which contain collective operations), and the combinations that
+C     are not supported yet
+      IF (ILump.eq.0) NSGROUPS_GBL = GROUP_IMAX(NSGROUPS)
       IF ((ILump.eq.0).and.(NSGROUPS.gt.0)) THEN
-         IF (MNPROC.gt.1) CALL terminate(exit_code=ADCIRC_EXIT_FAILURE,
-     &      message='VEW pairs and condensed nodes with the consistent '
-     &      //'GWCE (ILump = 0) are serial only for now')
          IF (CPRECOR) CALL terminate(exit_code=ADCIRC_EXIT_FAILURE,
      &      message='VEW pairs and condensed nodes with the consistent '
      &      //'GWCE do not support the predictor-corrector GWCE')
@@ -317,10 +317,11 @@ C... DW
 C... DW
 C... SB
       USE VEW1D, ONLY : ROTATE_AT_CONDENSEDNODES_ALL,
-     &     UADV, VADV, NSGROUPS, SGELEM, GMAP, NeiTabG, NNeighG,
+     &     UADV, VADV, NSGROUPS, NSGROUPS_GBL, SGELEM, GMAP, NeiTabG,
+     &     NNeighG,
      &     UPDATE_ACTIVE_GROUPS, GROUP_LOAD_SUM, GROUP_COPY_INCREMENT,
-     &     GROUP_SLOT, GROUP_BLOCK_RESET, GROUP_BLOCK_ADD
-      USE WEIR, ONLY : VEW_CREST_HYDRAULICS
+     &     GROUP_SLOT, GROUP_BLOCK_RESET, GROUP_BLOCK_ADD, GROUP_IMAX
+      USE WEIR, ONLY : VEW_CREST_HYDRAULICS, WEIR_SEMI_IMPLICIT
 C... SB
 #ifdef CMPI
       USE MESSENGER
@@ -477,10 +478,13 @@ C...
 C...  Consistent GWCE with coupled groups (VEW pairs, condensed nodes):
 C...  find this step's groups; the matrix is assembled again if they
 C...  changed, or if a time-varying crest moved (the matrix depends on DP)
-      CGROUPS = (ILump.eq.0).and.(NSGROUPS.gt.0)
+      CGROUPS = (ILump.eq.0).and.(NSGROUPS_GBL.gt.0)
       IF (CGROUPS) THEN
          CALL UPDATE_ACTIVE_GROUPS(GCHANGED)
-         IF (GCHANGED) NCChange = 1
+C        the assembly contains collective operations: all ranks or none
+         IA = 0
+         IF (GCHANGED) IA = 1
+         IF (GROUP_IMAX(IA).GT.0) NCChange = 1
       ENDIF
       IF ((ILump.eq.0).and.TVV_MOVED) NCChange = 1
 C...
@@ -2167,7 +2171,11 @@ C.... assembled at the representatives' rows and columns)
 C...  Weir pair blocks of the previous step out of the matrix
          CALL GROUP_BLOCK_RESET(COEF, MATNEW)
          CALL SEMI_WEIR_PAIRS(Tau0VAR, DT, QN0)
-         IF (SWP_N.EQ.0) THEN
+C...     every rank iterates if any has an active pair (JCG is collective)
+         SWNIT = 0
+         IF (SWP_N.GT.0) SWNIT = 1
+         IF (WEIR_SEMI_IMPLICIT) SWNIT = GROUP_IMAX(SWNIT)
+         IF (SWNIT.EQ.0) THEN
 C...  JCG ITERATIVE MATRIX SOLVER
          IPARM(1)=ITMAX
          CALL JCG(NP,MNP,MNEIG,NeiTabG,COEF,GWCE_LV,ETAS,
@@ -2248,7 +2256,11 @@ C           flux used by the solve vs the weir law at the new levels
                IF (SWRES.GT.SWATOL + SWRTOL*abs(SWQ)) SWCONV = .FALSE.
             ENDDO
             SWNIT = SWK
-            IF (SWCONV) EXIT
+            IF (SWCONV) THEN
+               IF (GROUP_IMAX(0).EQ.0) EXIT
+            ELSE
+               IF (GROUP_IMAX(1).EQ.0) EXIT
+            ENDIF
          ENDDO
          IF (.NOT.SWCONV .AND. SWNWARN.LT.10) THEN
             SWNWARN = SWNWARN + 1

@@ -37,8 +37,8 @@ module vew1d
              COMPUTE_VEW_ADVECT_VELOCITY, UADV, VADV, &
              VEW_ADVECT_FR_ATTACH, VEW_ADVECT_FR_FULL, VEW1D_ROTATE_VELOCITY, &
              SETUP_COUPLED_GROUPS, UPDATE_ACTIVE_GROUPS, GROUP_LOAD_SUM, GROUP_COPY_INCREMENT, &
-             GROUP_SLOT, NSGROUPS, ISSGMEMBER, SGELEM, GMAP, NeiTabG, NNeighG, &
-             GROUP_BLOCK_RESET, GROUP_BLOCK_ADD
+             GROUP_SLOT, NSGROUPS, NSGROUPS_GBL, ISSGMEMBER, SGELEM, GMAP, NeiTabG, NNeighG, &
+             GROUP_BLOCK_RESET, GROUP_BLOCK_ADD, GROUP_IMAX
 
    !...VEW1D_ROTATE_VELOCITY (VEW1DChannelControl, default off): rotate the element velocities and
    !   fluxes at two-node condensed groups along uncoupled VEW or land boundaries to the stream
@@ -58,6 +58,7 @@ module vew1d
    !   each of those neighbours, all members. Without static groups it is a copy of NeiTab.
    !   Formulation: docs/reports/vew-explicit-and-implicit-formulation (operable-structure project).
    integer :: NSGROUPS = 0                      ! number of static groups
+   integer :: NSGROUPS_GBL = 0                  ! its maximum over the ranks (set by initGWCE)
    logical, allocatable :: ISSGMEMBER(:)        ! node belongs to a static group
    logical, allocatable :: SGELEM(:)            ! element has a node in a static group
    integer, allocatable :: GMAP(:)              ! representative of the node's active group
@@ -985,11 +986,24 @@ contains
             end do
          end do
       end if
-      !...GJOIN keeps the smaller node as root, so the root is the lowest member
+      !...representative: the member with the lowest full-domain node number, so that every
+      !   subdomain holding the group picks the same node (adcprep keeps groups whole)
+      do M = 1, size(SGMEMBERS)
+         I = SGMEMBERS(M)
+         GCNT(GFIND(I)) = 0
+      end do
       do M = 1, size(SGMEMBERS)
          I = SGMEMBERS(M)
          R = GFIND(I)
-         GMAP(I) = R
+         if (GCNT(R) == 0) then
+            GCNT(R) = I
+         elseif (FULLNODE(I) < FULLNODE(GCNT(R))) then
+            GCNT(R) = I
+         end if
+      end do
+      do M = 1, size(SGMEMBERS)
+         I = SGMEMBERS(M)
+         GMAP(I) = GCNT(GFIND(I))
          if (GMAP(I) /= GMAPPREV(I)) CHANGED = .true.
          GMAPPREV(I) = GMAP(I)
       end do
@@ -1116,6 +1130,33 @@ contains
          end if
       end do
    end function GROUP_SLOT
+
+   !-------------------------------------------------------------
+   !  FULLNODE: full-domain node number of subdomain node N (N in serial runs)
+   !-------------------------------------------------------------
+   integer function FULLNODE(N)
+      use GLOBAL, only: NODES_LG
+      implicit none
+      integer, intent(IN) :: N
+      FULLNODE = N
+      if (allocated(NODES_LG)) FULLNODE = abs(NODES_LG(N))
+   end function FULLNODE
+
+   !-------------------------------------------------------------
+   !  GROUP_IMAX: maximum of K over all ranks (K in serial runs)
+   !-------------------------------------------------------------
+   integer function GROUP_IMAX(K)
+#ifdef CMPI
+      use mpi_f08, only: MPI_Allreduce, MPI_INTEGER, MPI_MAX
+      use GLOBAL, only: COMM
+#endif
+      implicit none
+      integer, intent(IN) :: K
+      GROUP_IMAX = K
+#ifdef CMPI
+      call MPI_Allreduce(K, GROUP_IMAX, 1, MPI_INTEGER, MPI_MAX, COMM)
+#endif
+   end function GROUP_IMAX
 
    !-------------------------------------------------------------
    !  union-find on GPARENT; the smaller node becomes the root

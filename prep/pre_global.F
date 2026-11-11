@@ -420,6 +420,13 @@ C--Local Map Variable Declarations
 C
 C     LOCALI section
       INTEGER NPROC,MSHAR,NWEIR
+C     Coupled-group closure for the consistent GWCE (decomp.F, PREP_GROUPS):
+C     static groups of nodes joined by weir/VEW pairs and condensed node
+C     groups; every subdomain that holds a member of a group gets all
+C     members and the elements around them
+      LOGICAL :: GCLOSURE = .FALSE.
+      LOGICAL :: GROUPS_BUILT = .FALSE.
+      INTEGER,ALLOCATABLE :: GROOT(:), GSIZE(:), GTOUCH(:)
       INTEGER,ALLOCATABLE::NELP(:), NNODP(:), NNEP(:,:,:)
       INTEGER,ALLOCATABLE::NOD_RES_TOT(:),NSTACP(:), NSTAMP(:)
       INTEGER,ALLOCATABLE::NWEIRP(:),NSTAEP(:),NSTAVP(:)
