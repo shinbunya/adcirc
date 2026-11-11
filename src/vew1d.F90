@@ -760,7 +760,7 @@ contains
       integer :: I, J, K, L, N, R, NMEM, NCOL, IE, NWP
       integer, allocatable :: ROOT(:), SIZEOF(:), FIRST(:), NEXT(:)
       integer, allocatable :: TAB(:, :), CNT(:), UNION(:)
-      integer :: NU
+      integer :: NU, NU0
       character(len=256) :: MSG
 
       allocate (GPARENT(NP), GMAP(NP), GMAPPREV(NP), ISSGMEMBER(NP), GSUM(NP), GCNT(NP))
@@ -859,6 +859,20 @@ contains
                call ADDUNIQUE(UNION, NU, NeiTab(I, J))
             end do
             I = NEXT(I)
+         end do
+         !...members of other groups next to this one (adjacent cross-sections of a condensed
+         !   channel share elements): add their whole groups, since a row of this group can need
+         !   the column of any of their members as representative
+         NU0 = NU
+         do K = 1, NU0
+            N = UNION(K)
+            if (ISSGMEMBER(N) .and. ROOT(N) /= R) then
+               I = FIRST(ROOT(N))
+               do while (I /= 0)
+                  call ADDUNIQUE(UNION, NU, I)
+                  I = NEXT(I)
+               end do
+            end if
          end do
          do K = 1, NU
             N = UNION(K)
