@@ -156,12 +156,13 @@ contains
    subroutine tvv_apply(timeloc)
       use MESH, only: DP
       use WEIR, only: BARINHT2
-      use GLOBAL, only: TVW
+      use GLOBAL, only: TVW, TVV_MOVED
       real(8), intent(in) :: timeloc
       integer :: ig, k
       real(8) :: zc, v0
       real(8), allocatable :: zp(:), dz(:)
 
+      TVV_MOVED = .false.
       if (.not. tvv_active) return
       do ig = 1, n_tvv_gates
          associate (g => tvv_gates(ig))
@@ -190,6 +191,7 @@ contains
             end do
             !...dz is the same on every rank, so all ranks take this branch together
             if (any(dz /= 0d0)) then
+               TVV_MOVED = .true.
                call shift_eta(ig, dz)
                g%dvol = g%dvol + gate_volume(ig) - v0
             end if
@@ -886,7 +888,7 @@ contains
    !  Startup consistency checks. Stops the run on an inconsistency.
    !-----------------------------------------------------------------------
    subroutine check_startup()
-      use GLOBAL, only: ILUMP, IHOT, STATIM, TVV_DELTA
+      use GLOBAL, only: IHOT, STATIM, TVV_DELTA
       use MESH, only: NP, DP
       use NodalAttributes, only: Tau0, LoadTau0, Tau0DefVal, LoadCondensedNodes, &
                                  NListCondensedNodes, NNodesListCondensedNodes, ListCondensedNodes, &
@@ -896,11 +898,8 @@ contains
       real(8) :: zc
       character(1024) :: msg
 
-      !...The GWCE left-hand side and TAU0 must not depend on DP
-      if (ILUMP == 0) then
-         call terminate(exit_code=ADCIRC_EXIT_FAILURE, message="TVV: time-varying crest VEWs "// &
-                        "need a lumped GWCE mass matrix (ILump=1); a consistent mass matrix is not supported yet.")
-      end if
+      !...TAU0 must not depend on DP. The consistent GWCE matrix (ILump = 0) does, through the implicit
+      !   gravity term; GWCE_New assembles it again in every step in which a crest moves (TVV_MOVED).
       !...The VEW1D wet-perimeter friction caches bank elevations from DP at startup
       if (activateVEW1DChannelWetPerimeter) then
          call terminate(exit_code=ADCIRC_EXIT_FAILURE, message="TVV: time-varying crest VEWs "// &
