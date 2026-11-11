@@ -15,7 +15,7 @@ Vertical Element Walls (VEWs) are a special boundary condition in ADCIRC that al
 VEWs effectively create internal boundaries that allow water to flow between adjacent elements with different bed elevations, providing a more effective representation of channelized flow while maintaining computational efficiency.
 
 .. note::
-   VEWs and the :ref:`condensed_nodes` nodal attribute are implemented only for :ref:`IM` values that run ADCIRC in the lumped explicit mode.
+   VEWs and the :ref:`condensed_nodes` nodal attribute work with the lumped explicit GWCE and with the consistent (implicit or semi-implicit) GWCE (:ref:`IM` sixth digit 1, or IM = 0). With the consistent GWCE, the nodes that share one water level (VEW pairs whose wall is submerged on both sides, and the members of a condensed node group) are given one unknown in the GWCE matrix, which stays symmetric and positive definite. The consistent GWCE with VEWs or condensed nodes is available in serial runs only for now, and not with the predictor-corrector GWCE, periodic boundaries, subdomain modeling, or an elevation-specified boundary node on a VEW or condensed node. The weir flux of VEW pairs whose wall is not submerged is computed from the levels of the previous time step, which can limit the time step.
 
 The crest of a VEW can also vary in time to represent a moving gate; see :ref:`time_varying_crest_vew`.
 
@@ -97,7 +97,7 @@ The water level is shifted at both time levels used by the GWCE. The gate positi
 
 Requirements and limitations:
 
-- lumped explicit GWCE (as for all VEWs) with a constant or prescribed :ref:`TAU0 <TAU0>` (TAU0 ≥ 0);
+- a constant or prescribed :ref:`TAU0 <TAU0>` (TAU0 ≥ 0); with the consistent GWCE the matrix is assembled again in every time step in which a crest moves;
 - not combined with the :ref:`wet perimeter consideration <wet_perimeter_consideration>`;
 - condensed node groups that contain wall-top nodes must consist of wall-top nodes of one gate;
 - only the crest elevation varies; the weir coefficients are fixed.
