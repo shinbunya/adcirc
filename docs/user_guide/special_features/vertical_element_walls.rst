@@ -76,7 +76,7 @@ Wet Perimeter Consideration
 .. _1d_channel:
 
 Quasi 1D Solution with Rotated Flow Along Flowline
-   For channels modeled with both vertical element walls and :ref:`condensed_nodes` nodal attribute, ADCIRC includes special handling of velocity components to ensure proper flow direction along the walls when they are not submerged. This prevents unrealistic cross-wall flow and maintains appropriate momentum balance in the system. This treatment gives 
+   For channels modeled with both vertical element walls and :ref:`condensed_nodes` nodal attribute, ADCIRC includes special handling of velocity components to ensure proper flow direction along the walls when they are not submerged. This prevents unrealistic cross-wall flow and maintains appropriate momentum balance in the system. The across-channel component of the nodal momentum load, wind stress and Coriolis force is removed at those nodes; rotating the velocities and fluxes in the element integrals to the stream direction as well is optional (:ref:`VEW1D_ROTATE_VELOCITY <VEW1D_ROTATE_VELOCITY>`, default off). This treatment gives 
 
 
 .. _time_varying_crest_vew:

@@ -35,7 +35,14 @@ module vew1d
    public :: ROTATE_AT_CONDENSEDNODES_ALL, ROTATEBACK_AT_CONDENSEDNODES_ALL, &
              REMOVE_NORMAL_AT_CONDENSEDNODES, GET_STREAMDIRECTION_AT_ELEMENT, &
              COMPUTE_VEW_ADVECT_VELOCITY, UADV, VADV, &
-             VEW_ADVECT_FR_ATTACH, VEW_ADVECT_FR_FULL
+             VEW_ADVECT_FR_ATTACH, VEW_ADVECT_FR_FULL, VEW1D_ROTATE_VELOCITY
+
+   !...VEW1D_ROTATE_VELOCITY (VEW1DChannelControl, default off): rotate the element velocities and
+   !   fluxes at two-node condensed groups along uncoupled VEW or land boundaries to the stream
+   !   direction in the GWCE and momentum element integrals (ROTATE_AT_CONDENSEDNODES). The nodal
+   !   treatments (rotate-back and removal of the normal component of the momentum load, wind stress
+   !   and Coriolis) do not depend on it.
+   logical :: VEW1D_ROTATE_VELOCITY = .false.
 
    !...Recovered crest velocity at coupled (submerged) IBTYPE=64 VEW node pairs, on with
    !   VEW_CREST_HYDRAULICS (WEIR module, VEW1DChannelControl namelist). A coupled pair shares one
@@ -181,6 +188,7 @@ contains
       integer :: IBND
       logical :: DO_ROTATE
 
+      if (.not. VEW1D_ROTATE_VELOCITY) return
       if (.not. LoadCondensedNodes) return
       if (NCondensedNodes(IND) /= 2) return
 
