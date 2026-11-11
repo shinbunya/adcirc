@@ -363,12 +363,13 @@ C     the namelist written to each subdomain fort.15 reads back as the original
       LOGICAL :: WEIR_ENERGY_HEAD = .FALSE.
       LOGICAL :: WEIR_SEMI_IMPLICIT = .FALSE.
       LOGICAL :: VEW1D_ROTATE_VELOCITY = .FALSE.
+      LOGICAL :: VEW1D_LUMP_MASS = .FALSE.
       NAMELIST /VEW1DChannelControl/ activateVEW1DChannelWetPerimeter,
      &  BARMIN64_SUBM, BARMIN64_NOSUBM, BARMIN64_SLIM, BARMIN64_CORNER,
      &  BARSLIM64_ELEM, BARSLIM64_EDGE, VEW_CREST_HYDRAULICS,
      &  VEW_FROUDE_CRIT, VEW_FROUDE_RECOUPLE,
      &  VEW_ADVECT_FR_ATTACH, VEW_ADVECT_FR_FULL,
-     &  VEW1D_ROTATE_VELOCITY,
+     &  VEW1D_ROTATE_VELOCITY, VEW1D_LUMP_MASS,
      &  WEIR_ENERGY_HEAD, WEIR_SEMI_IMPLICIT
 C     Weir options (the WEIR_ entries above are kept for older input files)
       logical :: foundWeirControlNamelist = .false.

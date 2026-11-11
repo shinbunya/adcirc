@@ -318,7 +318,7 @@ C... DW
 C... SB
       USE VEW1D, ONLY : ROTATE_AT_CONDENSEDNODES_ALL,
      &     UADV, VADV, NSGROUPS, NSGROUPS_GBL, SGELEM, GMAP, NeiTabG,
-     &     NNeighG,
+     &     NNeighG, VEW1D_LUMP_MASS,
      &     UPDATE_ACTIVE_GROUPS, GROUP_LOAD_SUM, GROUP_COPY_INCREMENT,
      &     GROUP_SLOT, GROUP_BLOCK_RESET, GROUP_BLOCK_ADD, GROUP_IMAX
       USE WEIR, ONLY : VEW_CREST_HYDRAULICS, WEIR_SEMI_IMPLICIT
@@ -349,6 +349,8 @@ C... SB
       INTEGER NCyc
       INTEGER NBDI
       INTEGER OnDiag, OffDiag
+      INTEGER OnDiagE, OffDiagE !element values (lumped in group elements)
+      LOGICAL LUMPG
 
       LOGICAL  DIE
       REAL(8) A00pB00
@@ -484,6 +486,7 @@ C...  Consistent GWCE with coupled groups (VEW pairs, condensed nodes):
 C...  find this step's groups; the matrix is assembled again if they
 C...  changed, or if a time-varying crest moved (the matrix depends on DP)
       CGROUPS = (ILump.eq.0).and.(NSGROUPS_GBL.gt.0)
+      LUMPG = CGROUPS.and.VEW1D_LUMP_MASS
       IF (CGROUPS) THEN
          CALL UPDATE_ACTIVE_GROUPS(GCHANGED)
 C        the assembly contains collective operations: all ranks or none
@@ -611,14 +614,23 @@ C
      &             (A00*2.D0*Tau0SigmaAvg*DT + SigmaAvg)*sponge_dis_mthd
                END IF              
 !
-               MsFacLOnDiag =OnDiag*AreaIE*(1.d0/DT+Tau0Avg_S/2.d0)/DT/12.d0
-               MsFacLOffDiag=OffDiag*AreaIE*(1.d0/DT+Tau0Avg_S/2.d0)/DT/12.d0
+C              VEW1D_LUMP_MASS: lumped mass in elements with a group node
+               OnDiagE = OnDiag
+               OffDiagE = OffDiag
+               IF (LUMPG) THEN
+                  IF (SGELEM(IE)) THEN
+                     OnDiagE = 4
+                     OffDiagE = 0
+                  ENDIF
+               ENDIF
+               MsFacLOnDiag =OnDiagE*AreaIE*(1.d0/DT+Tau0Avg_S/2.d0)/DT/12.d0
+               MsFacLOffDiag=OffDiagE*AreaIE*(1.d0/DT+Tau0Avg_S/2.d0)/DT/12.d0
 !JLW: adding subgrid to the on and off diagonal terms
                IF(level0)THEN
 !JLW: adding option to turn off dphidt term
-                  MSFacLOnDiag = MSFacLOnDiag*PHIAVG2 + OnDiag
+                  MSFacLOnDiag = MSFacLOnDiag*PHIAVG2 + OnDiagE
      &               *dphidt*AreaIE*((PHIAVG2-PHIAVG1)/2.d0)/DT/12.d0
-                  MSFacLOffDiag = MSFacLOffDiag*PHIAVG2 + OffDiag
+                  MSFacLOffDiag = MSFacLOffDiag*PHIAVG2 + OffDiagE
      &               *dphidt*AreaIE*((PHIAVG2-PHIAVG1)/2.d0)/DT/12.d0
                ENDIF
 
@@ -1138,6 +1150,14 @@ Corbitt 120322: Localized Advection
 !JLW: moving NCEle calulation further down. 
 !DW: uncomment line NCELE =  below to make the subgrid code run  
          NCELE=NC1*NC2*NC3*NOFF(IE)
+         OnDiagE = OnDiag
+         OffDiagE = OffDiag
+         IF (LUMPG) THEN
+            IF (SGELEM(IE)) THEN
+               OnDiagE = 4
+               OffDiagE = 0
+            ENDIF
+         ENDIF
          E0N1=ETA1(NM1)
          E0N2=ETA1(NM2)
          E0N3=ETA1(NM3)
@@ -1675,7 +1695,7 @@ C...     Assemble forcing for node NM1 (local index j=1)
          Temp_LV_A1=
 
 C...     Transient and Tau0 terms from LHS
-     &         (OnDiag*ESN1*SPM1 + OffDiag*(ESN2*SPM2+ESN3*SPM3))*MsFacR
+     &         (OnDiagE*ESN1*SPM1 + OffDiagE*(ESN2*SPM2+ESN3*SPM3))*MsFacR
 
 C...     Free surface terms from LHS (time levels s-1 & s)
      &        - GDPAvgOAreaIE4_S0*( C00*( SFCXADJ*FDX1*E0XGrad2A+ 
@@ -1690,10 +1710,10 @@ C...     Spatially varying Tau0 terms
      &        +Tau0SpaVar
 C
 C..... DW: begin
-     &        +(OnDiag*E0N1*SPM1 + OffDiag*(E0N2*SPM2+E0N3*SPM3))*MsFacR_S
-     &        +(onDiag*ESAN1*SPM1 + OffDiag*(ESAN2*SPM2+ESAN3*SPM3))*MsFacRS_T
-     &        +(onDiag*ABC00_EAN1*SPM1 + 
-     &                OffDiag*(ABC00_EAN2*SPM2 + ABC00_EAN3*SPM3))*MsFacRS_ABC00
+     &        +(OnDiagE*E0N1*SPM1 + OffDiagE*(E0N2*SPM2+E0N3*SPM3))*MsFacR_S
+     &        +(OnDiagE*ESAN1*SPM1 + OffDiagE*(ESAN2*SPM2+ESAN3*SPM3))*MsFacRS_T
+     &        +(OnDiagE*ABC00_EAN1*SPM1 + 
+     &                OffDiagE*(ABC00_EAN2*SPM2 + ABC00_EAN3*SPM3))*MsFacRS_ABC00
 C..... END DW
 C
 
@@ -1701,7 +1721,7 @@ C...     Assemble forcing for node NM2 (local index j=2)
          Temp_LV_A2=
 
 C...     Transient and Tau0 terms from LHS
-     &         (OnDiag*ESN2*SPM2 + OffDiag*(ESN1*SPM1+ESN3*SPM3))*MsFacR
+     &         (OnDiagE*ESN2*SPM2 + OffDiagE*(ESN1*SPM1+ESN3*SPM3))*MsFacR
 
 C...     Free surface terms from LHS (time levels s-1 & s)
      &        - GDPAvgOAreaIE4_S0*( C00*( SFCXADJ*FDX2*E0XGrad2A +
@@ -1716,10 +1736,10 @@ C...     Spatially varying Tau0 terms
      &        +Tau0SpaVar 
 C
 C..... DW: begin
-     &        +(OnDiag*E0N2*SPM2 + OffDiag*(E0N1*SPM1+E0N3*SPM3))*MsFacR_S
-     &        +(onDiag*ESAN2*SPM2 + OffDiag*(ESAN1*SPM1+ESAN3*SPM3))*MsFacRS_T
-     &        +(onDiag*ABC00_EAN2*SPM2 + 
-     &                 OffDiag*(ABC00_EAN1*SPM1 + ABC00_EAN3*SPM3))*MsFacRS_ABC00
+     &        +(OnDiagE*E0N2*SPM2 + OffDiagE*(E0N1*SPM1+E0N3*SPM3))*MsFacR_S
+     &        +(OnDiagE*ESAN2*SPM2 + OffDiagE*(ESAN1*SPM1+ESAN3*SPM3))*MsFacRS_T
+     &        +(OnDiagE*ABC00_EAN2*SPM2 + 
+     &                 OffDiagE*(ABC00_EAN1*SPM1 + ABC00_EAN3*SPM3))*MsFacRS_ABC00
 C..... END DW
 C
 
@@ -1729,7 +1749,7 @@ C...     Assemble forcing for node NM3 (local index j=3)
          Temp_LV_A3=
 
 C...     Transient and Tau0 terms from LHS
-     &         (OnDiag*ESN3*SPM3 + OffDiag*(ESN1*SPM1+ESN2*SPM2))*MsFacR
+     &         (OnDiagE*ESN3*SPM3 + OffDiagE*(ESN1*SPM1+ESN2*SPM2))*MsFacR
 
 C...     Free surface terms from LHS (time levels s-1 & s)
      &        - GDPAvgOAreaIE4_S0*(  C00*( SFCXADJ*FDX3*E0XGrad2A +
@@ -1744,10 +1764,10 @@ C...     Spatially varying Tau0 terms
      &        +Tau0SpaVar
 
 C..... DW: begin, absorbing layer
-     &        +(OnDiag*E0N3*SPM3 + OffDiag*(E0N1*SPM1+E0N2*SPM2))*MsFacR_S
-     &        +(OnDiag*ESAN3*SPM3 + OffDiag*(ESAN1*SPM1+ESAN2*SPM2))*MsFacRS_T
-     &        +(OnDiag*ABC00_EAN3*SPM3 + 
-     &               OffDiag*(ABC00_EAN1*SPM1 + ABC00_EAN2*SPM2))*MsFacRS_ABC00
+     &        +(OnDiagE*E0N3*SPM3 + OffDiagE*(E0N1*SPM1+E0N2*SPM2))*MsFacR_S
+     &        +(OnDiagE*ESAN3*SPM3 + OffDiagE*(ESAN1*SPM1+ESAN2*SPM2))*MsFacRS_T
+     &        +(OnDiagE*ABC00_EAN3*SPM3 + 
+     &               OffDiagE*(ABC00_EAN1*SPM1 + ABC00_EAN2*SPM2))*MsFacRS_ABC00
 C..... END DW
 
 C...     Put these partial products directly into nodal storage
