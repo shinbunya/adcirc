@@ -1777,12 +1777,21 @@ module WEIR_FLUX
    integer, allocatable :: SW_PARTNER(:)
    logical :: SW_ANY = .false.
 
+   !...Active pairs for the consistent GWCE (SEMI_WEIR_PAIRS): entry on side A, nodes, pair length,
+   !   c+ and c-, q(n-1) from A to B, crest, discharge coefficients, velocity heads
+   integer :: SWP_N = 0
+   integer, allocatable :: SWP_I(:), SWP_NA(:), SWP_NB(:)
+   real(8), allocatable :: SWP_ELL(:), SWP_CP(:), SWP_CM(:), SWP_QOLD(:), SWP_ZC(:), &
+                           SWP_CSB(:), SWP_CSP(:), SWP_HVA(:), SWP_HVB(:)
+
    public :: COMPUTE_EXTERNAL_BOUNDARY_FLUX, &
              COMPUTE_INTERNAL_BOUNDARY_FLUX, &
              COMPUTE_CROSS_BARRIER_PIPE_FLUX, &
              COMPUTE_INTERNAL_BOUNDARY64_FLUX, &
              SET_SUBMERGED64_AT, RESTART_VEW64_FLUXES, &
-             SEMI_WEIR_PREPARE, SEMI_WEIR_SOLVE, SW_ACT, SW_ANY
+             SEMI_WEIR_PREPARE, SEMI_WEIR_SOLVE, SW_ACT, SW_ANY, &
+             SEMI_WEIR_PAIRS, SEMI_WEIR_Q, SEMI_WEIR_STORE, SWP_N, SWP_NA, SWP_NB, &
+             SWP_ELL, SWP_CP, SWP_CM, SWP_QOLD
 
    !-----------------------------------------------------------------------
 contains
@@ -2849,8 +2858,9 @@ contains
       SW_ANY = .false.
       if (.not. WEIR_SEMI_IMPLICIT) return
       if (.not. allocated(SW_ACT)) then
-         if (ILUMP == 0) call terminate(exit_code=ADCIRC_EXIT_FAILURE, &
-            message="WEIR_SEMI_IMPLICIT needs the lumped GWCE (IM digit 6 = 2)")
+         !...consistent GWCE: the pair coupling enters the matrix, serial only for now
+         if (ILUMP == 0 .and. MNPROC > 1) call terminate(exit_code=ADCIRC_EXIT_FAILURE, &
+            message="WEIR_SEMI_IMPLICIT with the consistent GWCE (ILump = 0) is serial only for now")
          !...in parallel runs for IBTYPE 4/24 only for now: an IBTYPE=64 pair's coupled group (condensed
          !   wall top and coupled feet) can be split between subdomains
          if (MNPROC > 1 .and. NFLUXIB64_GBL > 0) call terminate(exit_code=ADCIRC_EXIT_FAILURE, &
@@ -3086,28 +3096,9 @@ contains
          gfun = f + cm*qold - cp*qlaw(ea - aa*f - zc, eb + ab*f - zc)
       end function gfun
 
-      !...signed weir discharge A -> B for heads ha, hb over the crest (ADCIRC IBTYPE 24/64 law)
       real(8) function qlaw(ha, hb)
          real(8), intent(IN) :: ha, hb
-         real(8) :: eu, hd, hu
-         if (ha + hva >= hb + hvb) then
-            hu = ha
-            eu = ha + hva
-            hd = hb
-            qlaw = 1.d0
-         else
-            hu = hb
-            eu = hb + hvb
-            hd = ha
-            qlaw = -1.d0
-         end if
-         if (hu <= 0.d0 .or. eu <= 0.d0) then
-            qlaw = 0.d0
-         elseif (hd > 2.d0*eu/3.d0) then
-            qlaw = qlaw*RampIntFlux*csb*hd*sqrt(2.d0*G*max(eu - hd, 0.d0))
-         else
-            qlaw = qlaw*RampIntFlux*csp*(2.d0*eu/3.d0)*sqrt(2.d0*eu*G/3.d0)
-         end if
+         qlaw = WEIR_QLAW(ha, hb, hva, hvb, csb, csp)
       end function qlaw
 
       recursive integer function find(i) result(ri)
@@ -3129,6 +3120,114 @@ contains
       end subroutine join
 
    end subroutine SEMI_WEIR_SOLVE
+
+   !-----------------------------------------------------------------------
+   !  WEIR_QLAW: signed weir discharge per unit width from side A to side B for heads ha, hb over
+   !  the crest, velocity heads hva, hvb, and discharge coefficients csb (subcritical) and csp
+   !  (supercritical) (ADCIRC IBTYPE 24/64 law, as used by the semi-implicit weir pairs)
+   !-----------------------------------------------------------------------
+   real(8) function WEIR_QLAW(ha, hb, hva, hvb, csb, csp) result(q)
+      implicit none
+      real(8), intent(IN) :: ha, hb, hva, hvb, csb, csp
+      real(8) :: eu, hd, hu
+      if (ha + hva >= hb + hvb) then
+         hu = ha
+         eu = ha + hva
+         hd = hb
+         q = 1.d0
+      else
+         hu = hb
+         eu = hb + hvb
+         hd = ha
+         q = -1.d0
+      end if
+      if (hu <= 0.d0 .or. eu <= 0.d0) then
+         q = 0.d0
+      elseif (hd > 2.d0*eu/3.d0) then
+         q = q*RampIntFlux*csb*hd*sqrt(2.d0*G*max(eu - hd, 0.d0))
+      else
+         q = q*RampIntFlux*csp*(2.d0*eu/3.d0)*sqrt(2.d0*eu*G/3.d0)
+      end if
+   end function WEIR_QLAW
+
+   !-----------------------------------------------------------------------
+   !  SEMI_WEIR_PAIRS (WEIR_SEMI_IMPLICIT, consistent GWCE): list this step's active pairs
+   !  (SW_ACT, set by SEMI_WEIR_PREPARE) with the data their flux needs: pair length
+   !  (0.5*(SW_LEN(A) + SW_LEN(B))), c+- = 1/(2 dt) +- tau0/2, q(n-1) from A to B, crest, discharge
+   !  coefficients and the velocity heads frozen at the step's start. The GWCE then solves the pairs'
+   !  fluxes together with the levels (gwce.F).
+   !-----------------------------------------------------------------------
+   subroutine SEMI_WEIR_PAIRS(TAU0V, DTS, QN0)
+      use BOUNDARIES, only: NVEL, NBV, IBCONN, LBCODEI, BARINCFSB, BARINCFSP, CSII, SIII
+      use GLOBAL, only: UU1, VV1
+      implicit none
+      real(8), intent(IN) :: TAU0V(:), QN0(:)
+      real(8), intent(IN) :: DTS
+      integer :: I, I2, NA, NB, P
+      real(8) :: tau, va, vb
+
+      SWP_N = 0
+      if (.not. SW_ANY) return
+      if (.not. allocated(SWP_I)) then
+         allocate (SWP_I(NVEL), SWP_NA(NVEL), SWP_NB(NVEL), SWP_ELL(NVEL), SWP_CP(NVEL), &
+                   SWP_CM(NVEL), SWP_QOLD(NVEL), SWP_ZC(NVEL), SWP_CSB(NVEL), SWP_CSP(NVEL), &
+                   SWP_HVA(NVEL), SWP_HVB(NVEL))
+      end if
+      do I = 1, NVEL
+         if (.not. SW_ACT(I)) cycle
+         I2 = SW_PARTNER(I)
+         if (I2 < I) cycle
+         if (0.5d0*(SW_LEN(I) + SW_LEN(I2)) <= 0.d0) cycle
+         NA = NBV(I)
+         NB = IBCONN(I)
+         SWP_N = SWP_N + 1
+         P = SWP_N
+         SWP_I(P) = I
+         SWP_NA(P) = NA
+         SWP_NB(P) = NB
+         SWP_ELL(P) = 0.5d0*(SW_LEN(I) + SW_LEN(I2))
+         tau = 0.5d0*(TAU0V(NA) + TAU0V(NB))
+         SWP_CP(P) = 0.5d0/DTS + 0.5d0*tau
+         SWP_CM(P) = 0.5d0/DTS - 0.5d0*tau
+         SWP_QOLD(P) = 0.5d0*(QN0(I2) - QN0(I))
+         SWP_ZC(P) = BARINHT2(I)
+         SWP_CSB(P) = BARINCFSB(I)
+         SWP_CSP(P) = BARINCFSP(I)
+         SWP_HVA(P) = 0.d0
+         SWP_HVB(P) = 0.d0
+         if ((LBCODEI(I) == 64 .and. VEW_CREST_HYDRAULICS) .or. &
+             (LBCODEI(I) /= 64 .and. WEIR_ENERGY_HEAD)) then
+            va = UU1(NA)*CSII(I) + VV1(NA)*SIII(I)
+            vb = UU1(NB)*CSII(I2) + VV1(NB)*SIII(I2)
+            SWP_HVA(P) = va*va/(2.d0*G)
+            SWP_HVB(P) = vb*vb/(2.d0*G)
+         end if
+      end do
+   end subroutine SEMI_WEIR_PAIRS
+
+   !-----------------------------------------------------------------------
+   !  SEMI_WEIR_Q: discharge per unit width from A to B of active pair P for the levels ea, eb
+   !-----------------------------------------------------------------------
+   real(8) function SEMI_WEIR_Q(P, ea, eb)
+      implicit none
+      integer, intent(IN) :: P
+      real(8), intent(IN) :: ea, eb
+      SEMI_WEIR_Q = WEIR_QLAW(ea - SWP_ZC(P), eb - SWP_ZC(P), SWP_HVA(P), SWP_HVB(P), &
+                              SWP_CSB(P), SWP_CSP(P))
+   end function SEMI_WEIR_Q
+
+   !-----------------------------------------------------------------------
+   !  SEMI_WEIR_STORE: write the solved discharge q (A -> B) of active pair P to QN2 (positive into
+   !  the domain) for the momentum equations and the next steps' forcing
+   !-----------------------------------------------------------------------
+   subroutine SEMI_WEIR_STORE(P, Q, QN2)
+      implicit none
+      integer, intent(IN) :: P
+      real(8), intent(IN) :: Q
+      real(8), intent(INOUT) :: QN2(:)
+      QN2(SWP_I(P)) = -Q
+      QN2(SW_PARTNER(SWP_I(P))) = Q
+   end subroutine SEMI_WEIR_STORE
 
    !-----------------------------------------------------------------------
    !     S U B R O U T I N E

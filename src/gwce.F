@@ -301,7 +301,8 @@ C
      &   NFLUXRBC, NOPE, NVEL, NBD, NBV, LBCODEI, BndLen2O3, NPEBC,
      &   NBOU, NVELL, IBCONN, ISSUBMERGED64, NFLUXIB64_GBL  ! Added for VEW1D  08-11-2022 SB
       USE WEIR_FLUX, ONLY : SEMI_WEIR_PREPARE, SEMI_WEIR_SOLVE, SW_ACT,
-     &   SW_ANY
+     &   SW_ANY, SEMI_WEIR_PAIRS, SEMI_WEIR_Q, SEMI_WEIR_STORE, SWP_N,
+     &   SWP_NA, SWP_NB, SWP_ELL, SWP_CP, SWP_CM, SWP_QOLD
       USE ITPACKV
       USE NodalAttributes, ONLY :
      &     LoadGeoidOffset, GeoidOffset, EVM, NOLIBF,
@@ -318,7 +319,7 @@ C... SB
       USE VEW1D, ONLY : ROTATE_AT_CONDENSEDNODES_ALL,
      &     UADV, VADV, NSGROUPS, SGELEM, GMAP, NeiTabG, NNeighG,
      &     UPDATE_ACTIVE_GROUPS, GROUP_LOAD_SUM, GROUP_COPY_INCREMENT,
-     &     GROUP_SLOT
+     &     GROUP_SLOT, GROUP_BLOCK_RESET, GROUP_BLOCK_ADD
       USE WEIR, ONLY : VEW_CREST_HYDRAULICS
 C... SB
 #ifdef CMPI
@@ -436,6 +437,18 @@ C...... DW
       LOGICAL :: CGROUPS, GCHANGED       ! coupled groups, consistent GWCE
       REAL(8) :: CE(3,3)                 ! element matrix (row, column)
       INTEGER :: NMIE(3), IA, IB
+      LOGICAL :: MATNEW                  ! the GWCE matrix was assembled this step
+C     Weir pairs at the new time level with the consistent GWCE
+      INTEGER, PARAMETER :: SWMAXIT = 30          ! maximum Picard iterations
+      REAL(8), PARAMETER :: SWRTOL = 1.d-6        ! relative tolerance on the pair flux
+      REAL(8), PARAMETER :: SWATOL = 1.d-10       ! absolute tolerance (m2/s)
+      REAL(8), PARAMETER :: SWSCAP = 1.d3         ! cap: l c+ S <= SWSCAP * diagonal
+      INTEGER :: SWK, SWP, SWRA, SWRB, SWNIT
+      INTEGER, SAVE :: SWNWARN = 0
+      REAL(8) :: SWEA, SWEB, SWQ, SWD, SWRES, SWRMAX, SWCAP, SWF
+      LOGICAL :: SWCONV
+      REAL(8), ALLOCATABLE :: SWS(:), SWQK(:), SWDK(:), SWQL(:)
+      REAL(8), ALLOCATABLE :: GWCE_LV0(:)
 
       LOG_SCOPE_TRACED("gwce_new", GWCE_TRACING)
 
@@ -476,7 +489,9 @@ C...  wetting or drying occurred in the previous time step.
 C...
 C..... DW, Dev 2019
 C.....  if CGWCE_HDP = .true. use H instead of DP in the surface gradient term
+      MATNEW = .FALSE.
       NCIFBLCK: IF(NCChange.GT.0 .or. CGWCE_HDP ) THEN !if any subdomain grid has changed
+         MATNEW = .TRUE.
          NCChange=0
 C.....Set up the LHS matrix (for the iterative matrix solver)
          IF ( ILump.eq.0 ) THEN ! default, fully consistent case
@@ -2149,11 +2164,105 @@ C.... assembled at the representatives' rows and columns)
       IF (CGROUPS) CALL GROUP_LOAD_SUM(GWCE_LV, ETA1, ETAS)
 
       IF (ILump.eq.0) THEN ! default, fully consistent LHS
+C...  Weir pair blocks of the previous step out of the matrix
+         CALL GROUP_BLOCK_RESET(COEF, MATNEW)
+         CALL SEMI_WEIR_PAIRS(Tau0VAR, DT, QN0)
+         IF (SWP_N.EQ.0) THEN
 C...  JCG ITERATIVE MATRIX SOLVER
          IPARM(1)=ITMAX
          CALL JCG(NP,MNP,MNEIG,NeiTabG,COEF,GWCE_LV,ETAS,
      &        IWKSP,NW,WKSP,IPARM,RPARM,IER)
          NUMITR=IPARM(1)
+         ELSE
+C...  Weir pairs at the new time level (WEIR_SEMI_IMPLICIT): Picard
+C...  iteration on the pair fluxes. Each pair's flux A -> B is linearised
+C...  as a chord about the latest levels, q = q_k + S*(dz - dz_k) with
+C...  S = q_k/dz_k, dz = zeta_A - zeta_B; the term c+*S*dz enters the
+C...  matrix as the symmetric block l*c+*S*[1 -1; -1 1] at the rows and
+C...  columns of the pair's group representatives, the rest of the pair
+C...  forcing f = c+*q - c-*q(n-1) goes to the load (A loses l*f, B
+C...  gains it). Repeat until the flux used equals the weir law at the
+C...  new levels. S is capped (and kept >= 0); a capped part is lagged.
+         ALLOCATE(SWS(SWP_N), SWQK(SWP_N), SWDK(SWP_N), SWQL(SWP_N))
+         ALLOCATE(GWCE_LV0(NP))
+         GWCE_LV0(1:NP) = GWCE_LV(1:NP)
+         NUMITR = 0
+         SWCONV = .FALSE.
+         SWRMAX = 0.d0
+         DO SWK = 1, SWMAXIT
+            CALL GROUP_BLOCK_RESET(COEF, .FALSE.)
+            GWCE_LV(1:NP) = GWCE_LV0(1:NP)
+C           chord slopes at the latest levels (ETA1 + ETAS)
+            DO SWP = 1, SWP_N
+               SWRA = GMAP(SWP_NA(SWP))
+               SWRB = GMAP(SWP_NB(SWP))
+               SWEA = ETA1(SWP_NA(SWP)) + ETAS(SWRA)
+               SWEB = ETA1(SWP_NB(SWP)) + ETAS(SWRB)
+               SWQK(SWP) = SEMI_WEIR_Q(SWP, SWEA, SWEB)
+               SWDK(SWP) = SWEA - SWEB
+               SWCAP = SWSCAP*min(COEF(SWRA,1), COEF(SWRB,1))
+     &               /(SWP_ELL(SWP)*SWP_CP(SWP))
+               IF (SWDK(SWP)*SWQK(SWP).GT.0.d0) THEN
+                  SWS(SWP) = min(SWQK(SWP)/SWDK(SWP), SWCAP)
+               ELSEIF (SWQK(SWP).EQ.0.d0.AND.SWDK(SWP).NE.0.d0) THEN
+                  SWS(SWP) = 0.d0
+               ELSEIF (SWDK(SWP).EQ.0.d0) THEN
+                  SWS(SWP) = SWCAP
+               ELSE
+                  SWS(SWP) = 0.d0   ! flux against the level difference
+               ENDIF
+            ENDDO
+            DO SWP = 1, SWP_N
+               SWRA = GMAP(SWP_NA(SWP))
+               SWRB = GMAP(SWP_NB(SWP))
+               IF (SWRA.EQ.SWRB) CYCLE
+               SWQ = SWP_ELL(SWP)*SWP_CP(SWP)*SWS(SWP)
+               CALL GROUP_BLOCK_ADD(COEF, SWRA, SWRA,  SWQ)
+               CALL GROUP_BLOCK_ADD(COEF, SWRA, SWRB, -SWQ)
+               CALL GROUP_BLOCK_ADD(COEF, SWRB, SWRA, -SWQ)
+               CALL GROUP_BLOCK_ADD(COEF, SWRB, SWRB,  SWQ)
+C              known part of the forcing: q_k - S*dz_k + S*(ETA1_A - ETA1_B)
+               SWF = SWP_ELL(SWP)*( SWP_CP(SWP)*( SWQK(SWP)
+     &             - SWS(SWP)*SWDK(SWP) + SWS(SWP)*(ETA1(SWP_NA(SWP))
+     &             - ETA1(SWP_NB(SWP))) ) - SWP_CM(SWP)*SWP_QOLD(SWP) )
+               GWCE_LV(SWRA) = GWCE_LV(SWRA) - SWF
+               GWCE_LV(SWRB) = GWCE_LV(SWRB) + SWF
+            ENDDO
+            IPARM(1)=ITMAX
+            CALL JCG(NP,MNP,MNEIG,NeiTabG,COEF,GWCE_LV,ETAS,
+     &           IWKSP,NW,WKSP,IPARM,RPARM,IER)
+            NUMITR = NUMITR + IPARM(1)
+C           flux used by the solve vs the weir law at the new levels
+            SWRMAX = 0.d0
+            SWCONV = .TRUE.
+            DO SWP = 1, SWP_N
+               SWRA = GMAP(SWP_NA(SWP))
+               SWRB = GMAP(SWP_NB(SWP))
+               SWEA = ETA1(SWP_NA(SWP)) + ETAS(SWRA)
+               SWEB = ETA1(SWP_NB(SWP)) + ETAS(SWRB)
+               SWD = SWEA - SWEB
+               SWQL(SWP) = SWQK(SWP) + SWS(SWP)*(SWD - SWDK(SWP))
+               SWQ = SEMI_WEIR_Q(SWP, SWEA, SWEB)
+               SWRES = abs(SWQ - SWQL(SWP))
+               SWRMAX = max(SWRMAX, SWRES)
+               IF (SWRES.GT.SWATOL + SWRTOL*abs(SWQ)) SWCONV = .FALSE.
+            ENDDO
+            SWNIT = SWK
+            IF (SWCONV) EXIT
+         ENDDO
+         IF (.NOT.SWCONV .AND. SWNWARN.LT.10) THEN
+            SWNWARN = SWNWARN + 1
+            WRITE(16,'(a,i0,a,i0,a,es10.3)') ' WARNING: GWCE weir pairs '
+     &         //'not converged at step ', IT, ' after ', SWNIT,
+     &         ' iterations; max |q - q_used| = ', SWRMAX
+         ENDIF
+C        the flux the GWCE used, for momentum and the next steps' forcing
+         DO SWP = 1, SWP_N
+            IF (GMAP(SWP_NA(SWP)).EQ.GMAP(SWP_NB(SWP))) CYCLE
+            CALL SEMI_WEIR_STORE(SWP, SWQL(SWP), QN2)
+         ENDDO
+         DEALLOCATE(SWS, SWQK, SWDK, SWQL, GWCE_LV0)
+         ENDIF
          IF (CGROUPS) CALL GROUP_COPY_INCREMENT(ETAS)
          DO I=1,NP
             ETA2(I)=NODECODE(I)*(ETAS(I)+dynamicWaterLevelCorrectionDelta(I))+ETA1(I) !COMPUTE NEW ELEVATIONS tgaContOffset

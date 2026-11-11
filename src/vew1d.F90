@@ -37,7 +37,8 @@ module vew1d
              COMPUTE_VEW_ADVECT_VELOCITY, UADV, VADV, &
              VEW_ADVECT_FR_ATTACH, VEW_ADVECT_FR_FULL, VEW1D_ROTATE_VELOCITY, &
              SETUP_COUPLED_GROUPS, UPDATE_ACTIVE_GROUPS, GROUP_LOAD_SUM, GROUP_COPY_INCREMENT, &
-             GROUP_SLOT, NSGROUPS, ISSGMEMBER, SGELEM, GMAP, NeiTabG, NNeighG
+             GROUP_SLOT, NSGROUPS, ISSGMEMBER, SGELEM, GMAP, NeiTabG, NNeighG, &
+             GROUP_BLOCK_RESET, GROUP_BLOCK_ADD
 
    !...VEW1D_ROTATE_VELOCITY (VEW1DChannelControl, default off): rotate the element velocities and
    !   fluxes at two-node condensed groups along uncoupled VEW or land boundaries to the stream
@@ -64,6 +65,11 @@ module vew1d
    integer, allocatable :: SGMEMBERS(:)         ! static members
    integer, allocatable :: NeiTabG(:, :), NNeighG(:)
    integer, allocatable :: GPARENT(:)           ! union-find work array
+   !...entries of the GWCE matrix changed by GROUP_BLOCK_ADD since the last reset (row, column
+   !   slot, value before the change), so that the assembled matrix can be restored
+   integer :: NBLK = 0
+   integer, allocatable :: BLKROW(:), BLKSLOT(:)
+   real(8), allocatable :: BLKORIG(:)
    real(8), allocatable :: GSUM(:)              ! work array for the group sums
    integer, allocatable :: GCNT(:)
 
@@ -747,9 +753,10 @@ contains
       use BOUNDARIES, only: NVEL, NBV, IBCONN, LBCODEI
       use NodalAttributes, only: LoadCondensedNodes, NListCondensedNodes, &
                                  NNodesListCondensedNodes, ListCondensedNodes
+      use WEIR, only: WEIR_SEMI_IMPLICIT
       use mod_logging, only: allMessage, INFO
       implicit none
-      integer :: I, J, K, L, N, R, NMEM, NCOL, IE
+      integer :: I, J, K, L, N, R, NMEM, NCOL, IE, NWP
       integer, allocatable :: ROOT(:), SIZEOF(:), FIRST(:), NEXT(:)
       integer, allocatable :: TAB(:, :), CNT(:), UNION(:)
       integer :: NU
@@ -814,8 +821,18 @@ contains
          GPARENT(I) = I
       end do
 
+      !...IBTYPE 4/24 pairs solved at the new time level (WEIR_SEMI_IMPLICIT) couple their two nodes
+      !   in the GWCE matrix (IBTYPE 64 pairs are static group members and are linked already)
+      NWP = 0
+      if (WEIR_SEMI_IMPLICIT) then
+         do I = 1, NVEL
+            if (LBCODEI(I) /= 4 .and. LBCODEI(I) /= 24) cycle
+            if (NBV(I) > 0 .and. IBCONN(I) > 0) NWP = NWP + 1
+         end do
+      end if
+
       !...GWCE neighbour table
-      if (NSGROUPS == 0) then
+      if (NSGROUPS == 0 .and. NWP == 0) then
          MNEIG = MNEI
          allocate (NeiTabG(MNP, MNEIG), NNeighG(MNP))
          NeiTabG = NeiTab
@@ -859,6 +876,14 @@ contains
             end if
          end do
       end do
+      if (NWP > 0) then
+         do I = 1, NVEL
+            if (LBCODEI(I) /= 4 .and. LBCODEI(I) /= 24) cycle
+            if (NBV(I) <= 0 .or. IBCONN(I) <= 0) cycle
+            call ADDTAB(NBV(I), IBCONN(I))
+            call ADDTAB(IBCONN(I), NBV(I))
+         end do
+      end if
       NCOL = maxval(CNT)
       MNEIG = max(MNEI, NCOL)
       allocate (NeiTabG(MNP, MNEIG), NNeighG(MNP))
@@ -875,9 +900,10 @@ contains
       end do
       deallocate (TAB, CNT, UNION, ROOT, SIZEOF, FIRST, NEXT)
 
-      write (MSG, '(a,i0,a,i0,a,i0,a,i0,a)') "Consistent GWCE: ", NSGROUPS, &
+      write (MSG, '(a,i0,a,i0,a,i0,a,i0,a,i0,a)') "Consistent GWCE: ", NSGROUPS, &
          " static coupled groups (VEW pairs and condensed nodes) with ", NMEM, &
-         " nodes; GWCE neighbour table width ", MNEIG, " (mesh table ", MNEI, ")."
+         " nodes, ", NWP, " IBTYPE 4/24 pair entries linked; GWCE neighbour table width ", MNEIG, &
+         " (mesh table ", MNEI, ")."
       call allMessage(INFO, trim(MSG))
 
    contains
@@ -1018,6 +1044,58 @@ contains
          if (GMAP(I) /= I) ETAS(I) = ETAS(GMAP(I))
       end do
    end subroutine GROUP_COPY_INCREMENT
+
+   !-------------------------------------------------------------
+   !  GROUP_BLOCK_RESET: restore the GWCE matrix entries changed by GROUP_BLOCK_ADD. ASSEMBLED is
+   !  .true. if the matrix was assembled again since (the saved values are then stale and dropped).
+   !-------------------------------------------------------------
+   subroutine GROUP_BLOCK_RESET(COEF, ASSEMBLED)
+      implicit none
+      real(8), intent(INOUT) :: COEF(:, :)
+      logical, intent(IN) :: ASSEMBLED
+      integer :: K
+      if (.not. ASSEMBLED) then
+         do K = NBLK, 1, -1
+            COEF(BLKROW(K), BLKSLOT(K)) = BLKORIG(K)
+         end do
+      end if
+      NBLK = 0
+   end subroutine GROUP_BLOCK_RESET
+
+   !-------------------------------------------------------------
+   !  GROUP_BLOCK_ADD: add V to the GWCE matrix entry (row IROW, column ICOL), remembering the entry's
+   !  value before its first change since the last GROUP_BLOCK_RESET
+   !-------------------------------------------------------------
+   subroutine GROUP_BLOCK_ADD(COEF, IROW, ICOL, V)
+      use mod_terminate, only: terminate, ADCIRC_EXIT_FAILURE
+      implicit none
+      real(8), intent(INOUT) :: COEF(:, :)
+      integer, intent(IN) :: IROW, ICOL
+      real(8), intent(IN) :: V
+      integer :: J, K
+      integer, allocatable :: ITMP(:)
+      real(8), allocatable :: RTMP(:)
+      J = GROUP_SLOT(IROW, ICOL)
+      if (J == 0) call terminate(exit_code=ADCIRC_EXIT_FAILURE, &
+                                 message="GWCE: weir pair column missing from the GWCE neighbour table")
+      do K = 1, NBLK
+         if (BLKROW(K) == IROW .and. BLKSLOT(K) == J) exit
+      end do
+      if (K > NBLK) then
+         if (.not. allocated(BLKROW)) then
+            allocate (BLKROW(64), BLKSLOT(64), BLKORIG(64))
+         elseif (NBLK == size(BLKROW)) then
+            allocate (ITMP(2*NBLK)); ITMP(1:NBLK) = BLKROW(1:NBLK); call move_alloc(ITMP, BLKROW)
+            allocate (ITMP(2*NBLK)); ITMP(1:NBLK) = BLKSLOT(1:NBLK); call move_alloc(ITMP, BLKSLOT)
+            allocate (RTMP(2*NBLK)); RTMP(1:NBLK) = BLKORIG(1:NBLK); call move_alloc(RTMP, BLKORIG)
+         end if
+         NBLK = NBLK + 1
+         BLKROW(NBLK) = IROW
+         BLKSLOT(NBLK) = J
+         BLKORIG(NBLK) = COEF(IROW, J)
+      end if
+      COEF(IROW, J) = COEF(IROW, J) + V
+   end subroutine GROUP_BLOCK_ADD
 
    !-------------------------------------------------------------
    !  GROUP_SLOT: column of node ICOL in row IROW of the GWCE matrix (NeiTabG), 0 if absent
