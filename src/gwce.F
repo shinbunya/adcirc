@@ -318,7 +318,7 @@ C
      &   TKM, NPERSEG, NTIP, NNPERBC, IPERCONN, VIDispDXOH,
      &   VIDispDYOH, IFSFM, IFNL_HDP, CGWCE_HDP, CAliDisp, H0, ALPHAL, windlim,
      &   usingDynamicWaterLevelCorrection, dynamicWaterLevelCorrection1,
-     &   dynamicWaterLevelCorrectionDelta, TVV_MOVED
+     &   dynamicWaterLevelCorrectionDelta, TVV_MOVED, NT
 #ifdef CMPI
      &    , dumy1, dumy2, rnp_global
 #endif
@@ -480,6 +480,11 @@ C     Weir pairs at the new time level with the consistent GWCE
       REAL(8), PARAMETER :: SWSCAP = 1.d3         ! cap: l c+ S <= SWSCAP * diagonal
       INTEGER :: SWK, SWP, SWRA, SWRB, SWNIT
       INTEGER, SAVE :: SWNWARN = 0
+C     solver totals of the consistent GWCE, written to fort.16 (cost of
+C     the weir pairs at the new time level): JCG solves and iterations,
+C     steps with active weir pairs and their Picard iterations
+      INTEGER(8), SAVE :: NJCGSOLVE = 0, NJCGIT = 0, NSWSTEP = 0,
+     &   NSWPIC = 0
       REAL(8) :: SWEA, SWEB, SWQ, SWD, SWRES, SWRMAX, SWCAP, SWF
       LOGICAL :: SWCONV
       REAL(8), ALLOCATABLE :: SWS(:), SWQK(:), SWDK(:), SWQL(:)
@@ -2178,6 +2183,8 @@ C...  JCG ITERATIVE MATRIX SOLVER
          CALL JCG(NP,MNP,MNEIG,NeiTabG,COEF,GWCE_LV,ETAS,
      &        IWKSP,NW,WKSP,IPARM,RPARM,IER)
          NUMITR=IPARM(1)
+         NJCGSOLVE = NJCGSOLVE + 1
+         NJCGIT = NJCGIT + NUMITR
          ELSE
 C...  Weir pairs at the new time level (WEIR_SEMI_IMPLICIT): Picard
 C...  iteration on the pair fluxes. Each pair's flux A -> B is linearised
@@ -2259,6 +2266,10 @@ C           flux used by the solve vs the weir law at the new levels
                IF (GROUP_IMAX(1).EQ.0) EXIT
             ENDIF
          ENDDO
+         NSWSTEP = NSWSTEP + 1
+         NSWPIC = NSWPIC + SWNIT
+         NJCGSOLVE = NJCGSOLVE + SWNIT
+         NJCGIT = NJCGIT + NUMITR
          IF (.NOT.SWCONV .AND. SWNWARN.LT.10) THEN
             SWNWARN = SWNWARN + 1
             WRITE(16,'(a,i0,a,i0,a,es10.3)') ' WARNING: GWCE weir pairs '
@@ -2273,6 +2284,11 @@ C        the flux the GWCE used, for momentum and the next steps' forcing
          DEALLOCATE(SWS, SWQK, SWDK, SWQL, GWCE_LV0)
          ENDIF
          IF (CGROUPS) CALL GROUP_COPY_INCREMENT(ETAS)
+         IF (MOD(IT,10000).EQ.0 .OR. IT.EQ.NT) WRITE(16,9871) IT,
+     &      NJCGSOLVE, NJCGIT, NSWSTEP, NSWPIC
+ 9871    FORMAT(' GWCE solver totals at step ',I0,': JCG solves ',I0,
+     &      ', JCG iterations ',I0,', steps with weir pairs at the ',
+     &      'new level ',I0,', their Picard iterations ',I0)
          DO I=1,NP
             ETA2(I)=NODECODE(I)*(ETAS(I)+dynamicWaterLevelCorrectionDelta(I))+ETA1(I) !COMPUTE NEW ELEVATIONS tgaContOffset
          END DO
