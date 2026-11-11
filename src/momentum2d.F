@@ -184,7 +184,7 @@ C*******************************************************************************
      &  IPERCONN, VIDispDXOH, VIDispDYOH, IFSFM, CAliDisp,
      &  usingDynamicWaterLevelCorrection, windlim,
      &  dynamicWaterLevelCorrection1, dynamicWaterLevelCorrection2, H0,
-     &  ilump, H1, H2
+     &  H1, H2
 #ifdef CMPI
      &  , dumy1
 #endif
@@ -970,6 +970,8 @@ C.....DW
       ENDDO
 
 C<<.. SECTION FOR VEW1D (=1D channel)   08-11-2022 SB
+C.... The momentum equations are lumped for either form of the GWCE, so this
+C.... applies with the consistent GWCE (ILump = 0) as well.
 C.... Nodal equations at IBTYPE=64 VEW boundary nodes and at condensed nodes are
 C.... summed up together in the following part. First, the value on the front side,
 C.... i.e., the floodplain side, is summed to the back side, i.e., the channel side.
@@ -984,7 +986,7 @@ C
 C     
 
 C     VEW: Sum front side values to back side
-      IF((NFLUXIB64_GBL.GT.0).AND.(ILUMP.NE.0)) THEN
+      IF(NFLUXIB64_GBL.GT.0) THEN
          flgNodesMultipliedByTotalArea(:) = 0  ! Initialize flags for nodes multiplied by total areas
 
          I = 0                         
@@ -1059,7 +1061,7 @@ C     VEW: Sum front side values to back side
 
 C.... CONDENSED NODES: Summing up the values at condensed nodes
 C.... Only wet members (NODECODE.NE.0) take part, as in the GWCE.
-      IF((LoadCondensedNodes).AND.(ILump.NE.0)) THEN
+      IF(LoadCondensedNodes) THEN
          DO K=1,NListCondensedNodes
             IF(ListCondensedNodes(K,1)==0) CYCLE
             ! 1) Sum the area-weighted LHS & RHS of the wet members
@@ -1108,15 +1110,14 @@ C.... Only wet members (NODECODE.NE.0) take part, as in the GWCE.
       ENDIF
 
 #ifdef CMPI
-      IF ((NFLUXIB64_GBL.GT.0.OR.LoadCondensedNodes)
-     &    .AND.(ILump.NE.0)) THEN
+      IF (NFLUXIB64_GBL.GT.0.OR.LoadCondensedNodes) THEN
          CALL UPDATEM4R(AUV)
          CALL UPDATER(MOM_LV_X,MOM_LV_Y,DUMY1,2)
       ENDIF
 #endif            
 
 C     VEW: Copy values from back side to front side
-      IF((NFLUXIB64_GBL.GT.0).AND.(ILUMP.NE.0)) THEN
+      IF(NFLUXIB64_GBL.GT.0) THEN
          I = 0                         
          DO K = 1, NBOU
             SELECT CASE(LBCODEI(I+1))
