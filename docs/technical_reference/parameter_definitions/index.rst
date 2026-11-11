@@ -3088,6 +3088,11 @@ WEIR_ENERGY_HEAD
 WEIR_SEMI_IMPLICIT
    Optional logical value (:ref:`weirControl <weirControl>`), default .false.: compute the weir flux of internal barrier pairs (IBTYPE 4 and 24, and IBTYPE 64 pairs in weir mode) with both water levels at the new time level, solved per pair together with the lumped GWCE, instead of with the levels of the previous time step. Removes the oscillations of the explicit weir flux at large time steps. Requires the lumped GWCE without the predictor-corrector. Parallel runs are supported unless the mesh has IBTYPE = 64 boundaries, for which it is serial only for now.
 
+.. _VEW1D_ROTATE_VELOCITY:
+
+VEW1D_ROTATE_VELOCITY
+   Optional logical value, default .false.: at the nodes of two-node :ref:`condensed_nodes` groups along a vertical element wall that is not submerged, or along a land boundary, rotate the velocities and fluxes used in the GWCE and momentum element integrals to the stream direction (see :ref:`1d_channel`). The removal of the across-channel component of the nodal momentum load, wind stress and Coriolis force at those nodes is always applied.
+
 .. _TVW:
 
 TVW
