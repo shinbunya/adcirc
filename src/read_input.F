@@ -136,7 +136,7 @@ Casey 251212: Adding time control.
      &   WEIR_ENERGY_HEAD, VEW_CREST_HYDRAULICS, VEW_FROUDE_CRIT,
      &   VEW_FROUDE_RECOUPLE, WEIR_SEMI_IMPLICIT
       USE VEW1D, ONLY: VEW_ADVECT_FR_ATTACH, VEW_ADVECT_FR_FULL,
-     &   VEW1D_ROTATE_VELOCITY, SETUP_COUPLED_GROUPS
+     &   VEW1D_ROTATE_VELOCITY, VEW1D_LUMP_MASS, SETUP_COUPLED_GROUPS
 
       USE WEIR, ONLY: FOUND_TVW_NML
       USE TIME_VARYING_WEIR_BOUNDARY
@@ -263,7 +263,7 @@ C.... SB
      &  BARSLIM64_ELEM, BARSLIM64_EDGE, VEW_CREST_HYDRAULICS,
      &  VEW_FROUDE_CRIT, VEW_FROUDE_RECOUPLE,
      &  VEW_ADVECT_FR_ATTACH, VEW_ADVECT_FR_FULL,
-     &  VEW1D_ROTATE_VELOCITY,
+     &  VEW1D_ROTATE_VELOCITY, VEW1D_LUMP_MASS,
 C       weir options, accepted here for older input files (weirControl
 C       below is their place and is read after this namelist)
      &  WEIR_ENERGY_HEAD, WEIR_SEMI_IMPLICIT
@@ -844,6 +844,9 @@ C     entries in VEW1DChannelControl
       call logMessage(ECHO,trim(scratchMessage))
       write(scratchMessage,'(a,l1)') "VEW1D_ROTATE_VELOCITY=",
      &   VEW1D_ROTATE_VELOCITY
+      call logMessage(ECHO,trim(scratchMessage))
+      write(scratchMessage,'(a,l1)') "VEW1D_LUMP_MASS=",
+     &   VEW1D_LUMP_MASS
       call logMessage(ECHO,trim(scratchMessage))
       rewind(15)
 
