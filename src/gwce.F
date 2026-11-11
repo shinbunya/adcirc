@@ -121,13 +121,19 @@ C.....for matrix conditioning,global to allow for reading in from hotstart file
 !     Allocates arrays and initializes constants.
 !----------------------------------------------------------------------
       subroutine initGWCE()
-      use sizes, only : mnp
-      use global, only : dt, ilump, alloc_main11, alloc_main11_lumped
+      use sizes, only : mnp, mnproc
+      use global, only : dt, ilump, alloc_main11, alloc_main11_lumped,
+     &   CPRECOR, NPERSEG
       USE ADC_CONSTANTS, only: g
       use mesh, only : np
+      use boundaries, only : NETA, NBD
       use itpackv, only : dfault
       use mod_logging, only: log_unit
+      use mod_terminate, only: terminate, ADCIRC_EXIT_FAILURE
+      use subdomain, only : subdomainOn
+      use vew1d, only : NSGROUPS, ISSGMEMBER
       implicit none
+      integer :: i
 
       allocate(lsxx(mnp),lsxy(mnp),lsyx(mnp),lsyy(mnp))
       allocate(etas0(mnp))
@@ -136,6 +142,30 @@ C.....for matrix conditioning,global to allow for reading in from hotstart file
       allocate( iwksp(3*mnp),wksp(4*mnp+400) )
       dt2=dt*2.d0
       ga00=g*a00
+
+C     Coupled groups (VEW pairs, condensed nodes) in the consistent GWCE:
+C     combinations that are not supported yet
+      IF ((ILump.eq.0).and.(NSGROUPS.gt.0)) THEN
+         IF (MNPROC.gt.1) CALL terminate(exit_code=ADCIRC_EXIT_FAILURE,
+     &      message='VEW pairs and condensed nodes with the consistent '
+     &      //'GWCE (ILump = 0) are serial only for now')
+         IF (CPRECOR) CALL terminate(exit_code=ADCIRC_EXIT_FAILURE,
+     &      message='VEW pairs and condensed nodes with the consistent '
+     &      //'GWCE do not support the predictor-corrector GWCE')
+         IF (NPERSEG.gt.0) CALL terminate(exit_code=ADCIRC_EXIT_FAILURE,
+     &      message='VEW pairs and condensed nodes with the consistent '
+     &      //'GWCE do not support periodic boundaries')
+         IF (subdomainOn) CALL terminate(exit_code=ADCIRC_EXIT_FAILURE,
+     &      message='VEW pairs and condensed nodes with the consistent '
+     &      //'GWCE do not support subdomain modeling')
+         DO i=1,NETA
+            IF (ISSGMEMBER(NBD(i))) CALL terminate(
+     &         exit_code=ADCIRC_EXIT_FAILURE,
+     &         message='An elevation-specified boundary node is a '
+     &         //'VEW pair or condensed node; not supported with the '
+     &         //'consistent GWCE')
+         ENDDO
+      ENDIF
 
 C     jgf48.4619: Accommodate Seizos changes for explicit solve
       IF (ILump.eq.0) THEN ! default, fully consistent LHS
@@ -255,12 +285,12 @@ C
      &   VIDispDYOH, IFSFM, IFNL_HDP, CGWCE_HDP, CAliDisp, H0, ALPHAL, windlim,
      &   usingDynamicWaterLevelCorrection, dynamicWaterLevelCorrection1,
      &   dynamicWaterLevelCorrectionDelta, 
-     &   COEFDTemp, COEFDTempMem  ! Added for VED1D  08-11-2022 SB
+     &   COEFDTemp, COEFDTempMem, TVV_MOVED  ! Added for VED1D  08-11-2022 SB
 #ifdef CMPI
      &    , dumy1, dumy2, rnp_global
 #endif
       USE ADC_CONSTANTS, ONLY: G, RHOWAT0, Bd, Ad, Cs2
-      USE SIZES, ONLY: MNP, MNEI
+      USE SIZES, ONLY: MNP, MNEI, MNEIG
       use mod_terminate, only: terminate, ADCIRC_EXIT_FAILURE
       USE MESH, ONLY : NE, NP, NM, DP, NNeigh, NeiTab, TotalArea, FDXE,
      &   Areas, NEIMAX, SFAC, nneighele, neitabele, FDYE,
@@ -286,7 +316,9 @@ C... DW
 C... DW
 C... SB
       USE VEW1D, ONLY : ROTATE_AT_CONDENSEDNODES_ALL,
-     &     UADV, VADV
+     &     UADV, VADV, NSGROUPS, SGELEM, GMAP, NeiTabG, NNeighG,
+     &     UPDATE_ACTIVE_GROUPS, GROUP_LOAD_SUM, GROUP_COPY_INCREMENT,
+     &     GROUP_SLOT
       USE WEIR, ONLY : VEW_CREST_HYDRAULICS
 C... SB
 #ifdef CMPI
@@ -401,6 +433,9 @@ C...... DW
       REAL(8) :: PHIAVG1, PHIAVG2
       REAL(8) :: PHI1N1, PHI1N2, PHI1N3
       REAL(8) :: PHI2N1, PHI2N2, PHI2N3
+      LOGICAL :: CGROUPS, GCHANGED       ! coupled groups, consistent GWCE
+      REAL(8) :: CE(3,3)                 ! element matrix (row, column)
+      INTEGER :: NMIE(3), IA, IB
 
       LOG_SCOPE_TRACED("gwce_new", GWCE_TRACING)
 
@@ -425,6 +460,16 @@ C     are also used in the calculation of the GWCE load vector gwce_lv.
 C...  Consistent mass matrix: ILump=0, lumped mass matrix: ILump=1
       OnDiag=(1+ILump)*2        !diagonal coefficient
       OffDiag=(1-ILump)         !off diagonal coefficient
+C...
+C...  Consistent GWCE with coupled groups (VEW pairs, condensed nodes):
+C...  find this step's groups; the matrix is assembled again if they
+C...  changed, or if a time-varying crest moved (the matrix depends on DP)
+      CGROUPS = (ILump.eq.0).and.(NSGROUPS.gt.0)
+      IF (CGROUPS) THEN
+         CALL UPDATE_ACTIVE_GROUPS(GCHANGED)
+         IF (GCHANGED) NCChange = 1
+      ENDIF
+      IF ((ILump.eq.0).and.TVV_MOVED) NCChange = 1
 C...
 C...  Recompute the GWCE system matrix at the first time step or if any
 C...  wetting or drying occurred in the previous time step.
@@ -567,6 +612,53 @@ C              Node-by-Node
                SPM1 = SFCT(NMI1) 
                SPM2 = SFCT(NMI2)
                SPM3 = SFCT(NMI3)
+C              Coupled groups: assemble at the rows and columns of the
+C              group representatives (P^T K P)
+               IF (CGROUPS) THEN
+                 IF (SGELEM(IE)) THEN
+                  CE(1,1) = (MsFacLOnDiag*SPM1
+     &                  + GA00DPAvgOAreaIE4*( SFCXADJ*FDX1*FDX1 +
+     &                                        SFCYADJ*FDY1*FDY1) )*NCELE
+                  CE(1,2) = (MsFacLOffDiag*SPM2
+     &                  + GA00DPAvgOAreaIE4*( SFCXADJ*FDX1*FDX2 + 
+     &                                        SFCYADJ*FDY1*FDY2) )*NCELE
+                  CE(1,3) = (MsFacLOffDiag*SPM3
+     &                  + GA00DPAvgOAreaIE4*( SFCXADJ*FDX1*FDX3 +
+     &                                        SFCYADJ*FDY1*FDY3) )*NCELE
+                  CE(2,1) = (MsFacLOffDiag*SPM1
+     &                  + GA00DPAvgOAreaIE4*( SFCXADJ*FDX2*FDX1 + 
+     &                                        SFCYADJ*FDY2*FDY1) )*NCELE
+                  CE(2,2) = (MsFacLOnDiag*SPM2
+     &                  + GA00DPAvgOAreaIE4*( SFCXADJ*FDX2*FDX2 + 
+     &                                        SFCYADJ*FDY2*FDY2) )*NCELE
+                  CE(2,3) = (MsFacLOffDiag*SPM3
+     &                  + GA00DPAvgOAreaIE4*( SFCXADJ*FDX2*FDX3 +
+     &                                        SFCYADJ*FDY2*FDY3) )*NCELE
+                  CE(3,1) = (MsFacLOffDiag*SPM1
+     &                  + GA00DPAvgOAreaIE4*( SFCXADJ*FDX3*FDX1 + 
+     &                                        SFCYADJ*FDY3*FDY1) )*NCELE
+                  CE(3,2) = (MsFacLOffDiag*SPM2
+     &                   + GA00DPAvgOAreaIE4*( SFCXADJ*FDX3*FDX2 +
+     &                                        SFCYADJ*FDY3*FDY2) )*NCELE
+                  CE(3,3) = (MsFacLOnDiag*SPM3
+     &                  + GA00DPAvgOAreaIE4*( SFCXADJ*FDX3*FDX3 + 
+     &                                        SFCYADJ*FDY3*FDY3) )*NCELE
+                  NMIE(1) = GMAP(NMI1)
+                  NMIE(2) = GMAP(NMI2)
+                  NMIE(3) = GMAP(NMI3)
+                  DO IA=1,3
+                     DO IB=1,3
+                        J = GROUP_SLOT(NMIE(IA),NMIE(IB))
+                        IF (J.EQ.0) CALL terminate(
+     &                     exit_code=ADCIRC_EXIT_FAILURE,
+     &                     message='GWCE: coupled-group column missing '
+     &                     //'from the GWCE neighbour table')
+                        Coef(NMIE(IA),J) = Coef(NMIE(IA),J) + CE(IA,IB)
+                     ENDDO
+                  ENDDO
+                  CYCLE FULLMASS
+                 ENDIF
+               ENDIF
 C              Assemble the LHS matrix
                Coef(NMI1,1)  = Coef(NMI1,1)   + (MsFacLOnDiag*SPM1
      &                  + GA00DPAvgOAreaIE4*( SFCXADJ*FDX1*FDX1 +
@@ -658,9 +750,11 @@ C...  boundary conditions while maintaining the symmetry of the system
 #endif
 c...        for each elevation specified boundary node, zero all off diagonal
 c...        terms on the row and set diagnoal term to EP
+c...        (NeiTabG: the GWCE matrix's neighbour table, NeiTab unless
+c...        coupled groups widen it)
             DO I=1,NETA
                Coef(NBD(I),1)=EP
-               DO J=2,NNEIGH(NBD(I))
+               DO J=2,NNeighG(NBD(I))
                   Coef(NBD(I),J)=0.0d0
                ENDDO
             ENDDO
@@ -669,11 +763,11 @@ c...        terms on the column but save these to be multiplied by the
 c...        boundary value and subtracted from the RHS
             OBCCoef = 0.d0 !jgf53.dev: later code assumes this is initialized to zero
             DO I=1,NETA
-               DO J=2,NNeigh(NBD(I))
-                  DO IJ=2,NNeigh(NeiTab(NBD(I),J))
-                     IF(NBD(I).EQ.NeiTab(NeiTab(NBD(I),J),IJ)) THEN
-                        OBCCoef(I,J-1)=Coef(NeiTab(NBD(I),J),IJ)
-                        Coef(NeiTab(NBD(I),J),IJ)=0.0d0
+               DO J=2,NNeighG(NBD(I))
+                  DO IJ=2,NNeighG(NeiTabG(NBD(I),J))
+                     IF(NBD(I).EQ.NeiTabG(NeiTabG(NBD(I),J),IJ)) THEN
+                        OBCCoef(I,J-1)=Coef(NeiTabG(NBD(I),J),IJ)
+                        Coef(NeiTabG(NBD(I),J),IJ)=0.0d0
                      ENDIF
                   ENDDO
                ENDDO
@@ -1880,8 +1974,8 @@ C...
             NBDI = NBD(I)
             ETAS(NBDI) = ETA2(NBDI)-ETA1(NBDI)
             GWCE_LV(NBDI) = ETAS(NBDI)*NODECODE(NBDI)*EP
-            DO J=2,NNEIGH(NBDI)
-               GWCE_LV(NEITAB(NBDI,J))=GWCE_LV(NEITAB(NBDI,J))
+            DO J=2,NNeighG(NBDI)
+               GWCE_LV(NeiTabG(NBDI,J))=GWCE_LV(NeiTabG(NBDI,J))
      &              -ETAS(NBDI)*OBCCOEF(I,J-1)
             END DO
          END DO
@@ -1929,8 +2023,8 @@ C.... this procedure, the values at the floodplain nodes and (condensed) channel
 C.... have the same values on both sides of the equations.
 C
 C.... Prep for the temporary LHS lumped array
-      IF(((NFLUXIB64_GBL.GT.0).AND.(ILump.NE.0)).OR.
-     &   (LoadCondensedNodes)) THEN
+      IF((ILump.NE.0).AND.
+     &   ((NFLUXIB64_GBL.GT.0).OR.(LoadCondensedNodes))) THEN
          COEFDTemp => COEFDTempMem
          COEFDTemp(:) = COEFD(:)
       ELSE
@@ -2049,12 +2143,18 @@ C     VEW: Copy values from back side to front side
       ENDIF
 C..>>
 
+C.... Consistent GWCE: sum the loads of each coupled group into its
+C.... representative and average ETA1 over the group (the matrix was
+C.... assembled at the representatives' rows and columns)
+      IF (CGROUPS) CALL GROUP_LOAD_SUM(GWCE_LV, ETA1, ETAS)
+
       IF (ILump.eq.0) THEN ! default, fully consistent LHS
 C...  JCG ITERATIVE MATRIX SOLVER
          IPARM(1)=ITMAX
-         CALL JCG(NP,MNP,MNEI,NEITAB,COEF,GWCE_LV,ETAS,
+         CALL JCG(NP,MNP,MNEIG,NeiTabG,COEF,GWCE_LV,ETAS,
      &        IWKSP,NW,WKSP,IPARM,RPARM,IER)
          NUMITR=IPARM(1)
+         IF (CGROUPS) CALL GROUP_COPY_INCREMENT(ETAS)
          DO I=1,NP
             ETA2(I)=NODECODE(I)*(ETAS(I)+dynamicWaterLevelCorrectionDelta(I))+ETA1(I) !COMPUTE NEW ELEVATIONS tgaContOffset
          END DO

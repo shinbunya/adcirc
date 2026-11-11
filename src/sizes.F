@@ -36,6 +36,7 @@ C   THAN 5 DIGITS OF PRECISION, THE MODEL RESULTS MAY NOT BE TRUSTWORTHY.
 C
       INTEGER ::  MNE,MNP,MNEI,MNOPE,MNETA,MNBOU,MNVEL,
      &  MNTIF,MNBFR,MNFFR,MNSTAE,MNSTAV,MNSTAC,MNSTAM,MNHARF
+      INTEGER :: MNEIG = 0  ! columns of the consistent GWCE matrix (MNEI unless VEW/condensed groups widen it)
       INTEGER :: MNPROC         ! Number of compute processors
       INTEGER :: MNWPROC        ! Number of writer processors
       INTEGER :: MNWPROH        ! Number of Hwriter processors !st3 100711

@@ -136,7 +136,7 @@ Casey 251212: Adding time control.
      &   WEIR_ENERGY_HEAD, VEW_CREST_HYDRAULICS, VEW_FROUDE_CRIT,
      &   VEW_FROUDE_RECOUPLE, WEIR_SEMI_IMPLICIT
       USE VEW1D, ONLY: VEW_ADVECT_FR_ATTACH, VEW_ADVECT_FR_FULL,
-     &   VEW1D_ROTATE_VELOCITY
+     &   VEW1D_ROTATE_VELOCITY, SETUP_COUPLED_GROUPS
 
       USE WEIR, ONLY: FOUND_TVW_NML
       USE TIME_VARYING_WEIR_BOUNDARY
@@ -4897,6 +4897,8 @@ C...
       CLOSE(15)
 
 !...  When using the consistent matrix, we need to pre-compute the CSR positions
+!...  and the coupled groups (VEW pairs, condensed nodes) with their GWCE neighbour table
+      if (ILUMP==0) call SETUP_COUPLED_GROUPS()
       if (ILUMP==0) call compute_csr_positions()
 
 C
