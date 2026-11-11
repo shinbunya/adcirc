@@ -55,6 +55,7 @@ C
       INTEGER,ALLOCATABLE :: ITVECT(:)
       LOGICAL(KIND=1),ALLOCATABLE :: ONPE(:)   ! node is on this subdomain
       LOGICAL(KIND=1),ALLOCATABLE :: ISPAIR(:) ! node is on one of its weir pairs
+      LOGICAL GROUP_TOUCHED
       CHARACTER PE*6
       CHARACTER(6), PARAMETER :: STRINGGLOBAL = "GLOBAL"
 C
@@ -164,16 +165,23 @@ C  Local-to-Global Weir Node maps: WEIRP_LG(:,PE), WEIRDP_LG(:,PE)
 C  Rule: if a global Weir node is assigned ( either as a resident or ghost node )
 C        then make it and its dual a local Weir-node pair
 
+      CALL PREP_GROUPS()
       IF (NWEIR.GT.0) THEN
         DO I=1, NPROC
 C          Mark the subdomain's nodes, then keep each pair with a marked
-C          node, in the order of the global list
+C          node, in the order of the global list; with coupled groups
+C          (consistent GWCE), also each pair of a group the subdomain holds
            DO K = 1, NNODP(I)
               ONPE(IMAP_NOD_LG(K,I)) = .TRUE.
            ENDDO
+           IF (GCLOSURE) CALL TOUCH_GROUPS(I, NNODP(I), IMAP_NOD_LG(1,I))
            ITOT = 0
            DO J = 1, NWEIR
-              IF (ONPE(WEIR(J)).OR.ONPE(WEIRD(J))) THEN
+              INDX = 0
+              IF (GCLOSURE) THEN
+                 IF (GTOUCH(GROOT(WEIR(J))).EQ.I) INDX = 1
+              ENDIF
+              IF (ONPE(WEIR(J)).OR.ONPE(WEIRD(J)).OR.(INDX.NE.0)) THEN
                  ITOT = ITOT + 1
                  WEIRP_LG(ITOT,I)  = WEIR(J)
                  WEIRDP_LG(ITOT,I) = WEIRD(J)
@@ -202,9 +210,10 @@ C  Rule:  Add an element if it has an resident node or
 C         has the dual Weir node of a resident or ghost node
 
       EL_SHARE(:) = -1
-      IF (NWEIR.GT.0) THEN
+      IF ((NWEIR.GT.0).OR.GCLOSURE) THEN
          DO I = 1,NPROC
             NELP(I) = 0
+            IF (GCLOSURE) CALL TOUCH_GROUPS(I, NNODP(I), IMAP_NOD_LG(1,I))
 c           print *, "PE = ",I-1
             ! mark the nodes of this subdomain's weir pairs
             DO J = 1, NWEIRP(I)
@@ -218,10 +227,16 @@ c           print *, "PE = ",I-1
                PE1 = IMAP_NOD_GL(1,N1)   ! Is any vertex a resident node?
                PE2 = IMAP_NOD_GL(1,N2)
                PE3 = IMAP_NOD_GL(1,N3)
+               ! or is a member of a coupled group this subdomain holds
+               INDX = 0
+               IF (GCLOSURE) THEN
+                  IF (GROUP_TOUCHED(I,N1,N2,N3)) INDX = -1
+               ENDIF
                ! if any vertex is a resident vertex, or is a node of
                ! one of this subdomain's weir pairs
                IF ((PE1.EQ.I).OR.(PE2.EQ.I).OR.(PE3.EQ.I)
-     &             .OR.ISPAIR(N1).OR.ISPAIR(N2).OR.ISPAIR(N3)) THEN
+     &             .OR.ISPAIR(N1).OR.ISPAIR(N2).OR.ISPAIR(N3)
+     &             .OR.(INDX.NE.0)) THEN
                   ! increment the number of elements on this subdomain
                   NELP(I) = NELP(I) + 1
                   ! add the fulldomain element number to the mapping;
@@ -688,6 +703,162 @@ C                                                                           C
 C  Takes dry run through the domain decomp to determine the max number of   C
 C  nodes and elements assigned to any subdomain to determine MNPP and MNEP. C
 C                                                                           C
+C----------------------------------------------------------------------
+C     PREP_GROUPS: coupled groups for the consistent GWCE.
+C     With the consistent GWCE (ILump = 0 in ADCIRC), padcirc solves one
+C     unknown per group of nodes that share a water level (VEW pairs and
+C     condensed node groups) and needs, on every subdomain that holds a
+C     member of such a group, all members and all elements around them
+C     (src/vew1d.F90, SETUP_COUPLED_GROUPS). This builds the static
+C     groups over the full domain: connected sets under all weir/VEW
+C     pairs (IBTYPE 4/24/64) and all condensed node groups (fort.13
+C     attribute condensed_nodes). The lumped GWCE needs no closure and
+C     its decomposition is left as it was.
+C----------------------------------------------------------------------
+      SUBROUTINE PREP_GROUPS()
+      USE PRE_GLOBAL
+      IMPLICIT NONE
+      INTEGER :: J, K, M, N, NNOD, NATTR, NND, NVALS(64), IOS, IU
+      INTEGER :: NODE, MEMB, NGROUPS
+      REAL(8) :: VALS(64)
+      CHARACTER(len=80) :: LINE, NAMES(64)
+      LOGICAL :: FOUND, CONSISTENT
+
+      IF (GROUPS_BUILT) RETURN
+      GROUPS_BUILT = .TRUE.
+C     consistent GWCE: IM digit 6 /= 2 for 6-digit IM, any other IM
+      IF (IM.GE.100000) THEN
+         CONSISTENT = (MOD(IM,10).NE.2)
+      ELSE
+         CONSISTENT = .TRUE.
+      ENDIF
+      IF (.NOT.CONSISTENT) RETURN
+      ALLOCATE(GROOT(NNODG), GSIZE(NNODG), GTOUCH(NNODG))
+      DO N = 1, NNODG
+         GROOT(N) = N
+      ENDDO
+      GTOUCH = 0
+      DO J = 1, NWEIR
+         IF (WEIR(J).GT.0 .AND. WEIRD(J).GT.0) CALL GJOIN(WEIR(J),WEIRD(J))
+      ENDDO
+C     condensed node groups from the full-domain fort.13
+      INQUIRE(FILE='fort.13', EXIST=FOUND)
+      IF (FOUND) THEN
+         OPEN(NEWUNIT=IU, FILE='fort.13', STATUS='OLD', ACTION='READ')
+         READ(IU,'(A80)') LINE
+         READ(IU,*) NNOD
+         READ(IU,*) NATTR
+         DO K = 1, NATTR
+            READ(IU,'(A80)') NAMES(K)
+            READ(IU,'(A80)') LINE
+            READ(IU,*) NVALS(K)
+            READ(IU,*) (VALS(M), M=1,NVALS(K))
+         ENDDO
+         DO K = 1, NATTR
+            READ(IU,'(A80)') LINE
+            READ(IU,*) NND
+            IF (TRIM(ADJUSTL(LINE)).EQ.'condensed_nodes') THEN
+               M = 0
+               DO J = 1, NATTR
+                  IF (TRIM(ADJUSTL(NAMES(J))).EQ.TRIM(ADJUSTL(LINE)))
+     &               M = NVALS(J)
+               ENDDO
+               DO J = 1, NND
+                  READ(IU,*,IOSTAT=IOS) NODE, (VALS(N), N=1,M)
+                  IF (IOS.NE.0) EXIT
+                  DO N = 1, M
+                     MEMB = NINT(VALS(N))
+                     IF (MEMB.GT.0 .AND. MEMB.LE.NNODG
+     &                   .AND. NODE.GT.0 .AND. NODE.LE.NNODG)
+     &                  CALL GJOIN(NODE, MEMB)
+                  ENDDO
+               ENDDO
+            ELSE
+               DO J = 1, NND
+                  READ(IU,'(A80)') LINE
+               ENDDO
+            ENDIF
+         ENDDO
+         CLOSE(IU)
+      ENDIF
+      GSIZE = 0
+      DO N = 1, NNODG
+         GROOT(N) = GFIND(N)
+         GSIZE(GROOT(N)) = GSIZE(GROOT(N)) + 1
+      ENDDO
+      NGROUPS = 0
+      DO N = 1, NNODG
+         IF (GROOT(N).EQ.N .AND. GSIZE(N).GT.1) NGROUPS = NGROUPS + 1
+      ENDDO
+      GCLOSURE = (NGROUPS.GT.0)
+      IF (GCLOSURE) WRITE(*,'(A,I0,A)') 'INFO: Consistent GWCE: ',
+     &   NGROUPS, ' coupled node groups (weir/VEW pairs, condensed '
+     &   //'nodes) are kept whole in every subdomain that holds them.'
+
+      CONTAINS
+
+      INTEGER FUNCTION GFIND(N0)
+      INTEGER, INTENT(IN) :: N0
+      INTEGER :: R, KK, NX
+      R = N0
+      DO WHILE (GROOT(R).NE.R)
+         R = GROOT(R)
+      ENDDO
+      KK = N0
+      DO WHILE (GROOT(KK).NE.R)
+         NX = GROOT(KK)
+         GROOT(KK) = R
+         KK = NX
+      ENDDO
+      GFIND = R
+      END FUNCTION GFIND
+
+      SUBROUTINE GJOIN(N1, N2)
+      INTEGER, INTENT(IN) :: N1, N2
+      INTEGER :: R1, R2
+      R1 = GFIND(N1)
+      R2 = GFIND(N2)
+      IF (R1.EQ.R2) RETURN
+      IF (R1.LT.R2) THEN
+         GROOT(R2) = R1
+      ELSE
+         GROOT(R1) = R2
+      ENDIF
+      END SUBROUTINE GJOIN
+
+      END SUBROUTINE PREP_GROUPS
+
+C----------------------------------------------------------------------
+C     TOUCH_GROUPS: mark the coupled groups that have a member among the
+C     nodes NODELIST of subdomain IPROC
+C----------------------------------------------------------------------
+      SUBROUTINE TOUCH_GROUPS(IPROC, NN, NODELIST)
+      USE PRE_GLOBAL
+      IMPLICIT NONE
+      INTEGER, INTENT(IN) :: IPROC, NN, NODELIST(NN)
+      INTEGER :: K, R
+      DO K = 1, NN
+         R = GROOT(NODELIST(K))
+         IF (GSIZE(R).GT.1) GTOUCH(R) = IPROC
+      ENDDO
+      END SUBROUTINE TOUCH_GROUPS
+
+C----------------------------------------------------------------------
+C     GROUP_TOUCHED: .true. if a vertex of the element (N1, N2, N3) is a
+C     member of a coupled group marked for subdomain IPROC
+C----------------------------------------------------------------------
+      LOGICAL FUNCTION GROUP_TOUCHED(IPROC, N1, N2, N3)
+      USE PRE_GLOBAL
+      IMPLICIT NONE
+      INTEGER, INTENT(IN) :: IPROC, N1, N2, N3
+      GROUP_TOUCHED = (GSIZE(GROOT(N1)).GT.1 .AND.
+     &                 GTOUCH(GROOT(N1)).EQ.IPROC) .OR.
+     &                (GSIZE(GROOT(N2)).GT.1 .AND.
+     &                 GTOUCH(GROOT(N2)).EQ.IPROC) .OR.
+     &                (GSIZE(GROOT(N3)).GT.1 .AND.
+     &                 GTOUCH(GROOT(N3)).EQ.IPROC)
+      END FUNCTION GROUP_TOUCHED
+
 C---------------------------------------------------------------------------C
 C
       SUBROUTINE DOMSIZE()
@@ -698,6 +869,7 @@ C
       INTEGER ITOT,IEL,IELG,ILNODE,ILNODE2,IPROC
       INTEGER IG1,IG2,IG3,IL1,IL2,IL3,PE1,PE2,PE3
       INTEGER RESNODE,NODES,NELEM,ONELEM,NLWEIR
+      INTEGER INDX
 C
       INTEGER,ALLOCATABLE :: ITVECT(:)
       INTEGER,ALLOCATABLE :: NODE_LG(:)
@@ -707,6 +879,7 @@ C
       INTEGER,ALLOCATABLE :: LWEIR_LG(:),LWEIRD_LG(:)
       LOGICAL(KIND=1),ALLOCATABLE :: ONPE(:)   ! node is on this subdomain
       LOGICAL(KIND=1),ALLOCATABLE :: ISPAIR(:) ! node is on one of its weir pairs
+      LOGICAL GROUP_TOUCHED
 C
       VTMAX = 24*MNP
       ALLOCATE ( ITVECT(VTMAX) )
@@ -817,15 +990,22 @@ C--If there are any global Weir-node pairs, construct
 C  Local-to-Global Weir Node maps
 C  Rule: if a global Weir node is assigned ( as resident or ghost node )
 C        then make it and its dual a local Weir-node pair
+      CALL PREP_GROUPS()
+      IF (GCLOSURE) CALL TOUCH_GROUPS(IPROC, NODES, NODE_LG)
       IF (NWEIR.GT.0) THEN
 C        Mark the subdomain's nodes, then keep each pair with a marked
-C        node, in the order of the global list
+C        node, in the order of the global list; with coupled groups
+C        (consistent GWCE), also each pair of a group the subdomain holds
          DO K = 1, NODES
             ONPE(NODE_LG(K)) = .TRUE.
          ENDDO
          ITOT = 0
          DO J = 1, NWEIR
-            IF (ONPE(WEIR(J)).OR.ONPE(WEIRD(J))) THEN
+            INDX = 0
+            IF (GCLOSURE) THEN
+               IF (GTOUCH(GROOT(WEIR(J))).EQ.IPROC) INDX = 1
+            ENDIF
+            IF (ONPE(WEIR(J)).OR.ONPE(WEIRD(J)).OR.(INDX.NE.0)) THEN
                ITOT = ITOT + 1
                LWEIR_LG(ITOT)  = WEIR(J)
                LWEIRD_LG(ITOT) = WEIRD(J)
@@ -855,7 +1035,7 @@ C         has the dual Weir node of a resident or ghost node
 
       ONELEM = NELEM     ! Save NELEM for PEs with no WEIR-pairs
       NELEM  = 0
-      IF (NLWEIR.GT.0) THEN
+      IF ((NLWEIR.GT.0).OR.GCLOSURE) THEN
         ! mark the nodes of this subdomain's weir pairs
         DO J = 1, NLWEIR
            ISPAIR(LWEIR_LG(J)) = .TRUE.
@@ -868,8 +1048,14 @@ C         has the dual Weir node of a resident or ghost node
            PE1 = NODE_GL1(N1)   ! Is any vertex a resident node?
            PE2 = NODE_GL1(N2)
            PE3 = NODE_GL1(N3)
+           ! or is a member of a coupled group this subdomain holds
+           INDX = 0
+           IF (GCLOSURE) THEN
+              IF (GROUP_TOUCHED(IPROC,N1,N2,N3)) INDX = -1
+           ENDIF
            IF ((PE1.EQ.IPROC).OR.(PE2.EQ.IPROC).OR.(PE3.EQ.IPROC)
-     &          .OR.ISPAIR(N1).OR.ISPAIR(N2).OR.ISPAIR(N3)) THEN
+     &          .OR.ISPAIR(N1).OR.ISPAIR(N2).OR.ISPAIR(N3)
+     &          .OR.(INDX.NE.0)) THEN
              NELEM = NELEM + 1
              ELEM_LG(NELEM) = K
            ENDIF
