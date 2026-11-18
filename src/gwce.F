@@ -137,7 +137,7 @@ C.....for matrix conditioning,global to allow for reading in from hotstart file
 !     Allocates arrays and initializes constants.
 !----------------------------------------------------------------------
       subroutine initGWCE()
-      use sizes, only : mnp, mneta, mnei, mneig, mnproc
+      use sizes, only : mnp, mneta, mnei, mneig
       use global, only : dt, ilump, CPRECOR, NPERSEG
       USE ADC_CONSTANTS, only: g
       use mesh, only : np
@@ -148,7 +148,8 @@ C.....for matrix conditioning,global to allow for reading in from hotstart file
       use mod_logging, only: log_unit
       use mod_terminate, only: terminate, ADCIRC_EXIT_FAILURE
       use subdomain, only : subdomainOn
-      use vew1d, only : NSGROUPS, ISSGMEMBER, NeiTabG, NNeighG
+      use vew1d, only : NSGROUPS, NSGROUPS_GBL, ISSGMEMBER, NeiTabG,
+     &   NNeighG, GROUP_IMAX
       implicit none
       integer :: i
 
@@ -165,11 +166,11 @@ C     Allocate GWCE load vector (always needed)
       gwce_lv = -99999.d0
 
 C     Coupled groups (VEW pairs, condensed nodes) in the consistent GWCE:
-C     combinations that are not supported yet
+C     whether any rank has groups (all ranks then take the group branches,
+C     which contain collective operations), and the combinations that
+C     are not supported yet
+      IF (ILump.eq.0) NSGROUPS_GBL = GROUP_IMAX(NSGROUPS)
       IF ((ILump.eq.0).and.(NSGROUPS.gt.0)) THEN
-         IF (MNPROC.gt.1) CALL terminate(exit_code=ADCIRC_EXIT_FAILURE,
-     &      message='VEW pairs and condensed nodes with the consistent '
-     &      //'GWCE (ILump = 0) are serial only for now')
          IF (CPRECOR) CALL terminate(exit_code=ADCIRC_EXIT_FAILURE,
      &      message='VEW pairs and condensed nodes with the consistent '
      &      //'GWCE do not support the predictor-corrector GWCE')
@@ -357,9 +358,9 @@ C... DW
 C... DW
 C... SB
       USE VEW1D, ONLY : ROTATE_AT_CONDENSEDNODES_ALL,
-     &     NSGROUPS, SGELEM, GMAP, NeiTabG, NNeighG,
+     &     NSGROUPS, NSGROUPS_GBL, SGELEM, GMAP, NeiTabG, NNeighG,
      &     UPDATE_ACTIVE_GROUPS, GROUP_LOAD_SUM, GROUP_COPY_INCREMENT,
-     &     GROUP_SLOT
+     &     GROUP_SLOT, GROUP_IMAX
       USE WEIR_PAIRS, ONLY : IMPLICIT_WEIR, WEIR_PAIRS_SETUP,
      &   WEIR_PAIRS_SOLVE_LUMPED, WEIR_PAIR_ENTRY, WEIR_PAIRS_LINEARIZE,
      &   WEIR_PAIRS_FINISH, WEIR_PAIRS_SYNC_MARKS, MNEIW, NEITABW
@@ -506,10 +507,13 @@ C...
 C...  Consistent GWCE with coupled groups (VEW pairs, condensed nodes):
 C...  find this step's groups; the matrix is assembled again if they
 C...  changed
-      CGROUPS = (ILump.eq.0).and.(NSGROUPS.gt.0)
+      CGROUPS = (ILump.eq.0).and.(NSGROUPS_GBL.gt.0)
       IF (CGROUPS) THEN
          CALL UPDATE_ACTIVE_GROUPS(GCHANGED)
-         IF (GCHANGED) NCChange = 1
+C        the assembly contains collective operations: all ranks or none
+         IA = 0
+         IF (GCHANGED) IA = 1
+         IF (GROUP_IMAX(IA).GT.0) NCChange = 1
       ENDIF
 C...
 C...  Recompute the GWCE system matrix at the first time step or if any
