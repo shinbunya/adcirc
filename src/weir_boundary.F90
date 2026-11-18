@@ -239,6 +239,7 @@ contains
    subroutine WEIR_SETUP()
       use GLOBAL, only: H0
       use BOUNDARIES, only: NFLUXIB, NFLUXIBP, NFLUXB
+      use WEIR_PAIRS, only: VEW_PAIR_MIN_HEAD
       implicit none
       character(1024) :: ScratchMessage
 
@@ -258,6 +259,7 @@ contains
 
       !               !...Set the minimum water depth above weir to appply weir formula along vertical element walls
       BARMIN64 = 1.2d0*H0 ! This is equivalent to HOFF in wetdry.F
+      VEW_PAIR_MIN_HEAD = BARMIN64 ! the same minimum head for VEW pairs at the new time level
       !               !...The submergence thresholds default to these values unless set in the
       !               !   boundaryControl or VEW1DChannelControl namelist (negative means not set)
       if (BARMIN64_NOSUBM < 0.d0) BARMIN64_NOSUBM = max(0.2d0, 2.d0*H0)

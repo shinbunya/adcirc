@@ -2,7 +2,8 @@
 !-----------------------------------------------------------------------
 !  M O D U L E   W E I R _ P A I R S
 !-----------------------------------------------------------------------
-!  Internal weir pairs (IBTYPE 4 and 24) at the new time level.
+!  Internal weir pairs (IBTYPE 4 and 24) and vertical element wall pairs
+!  in weir mode (IBTYPE 64) at the new time level.
 !
 !  An internal weir is two strings of boundary nodes facing each other
 !  across a crest; each facing couple is a pair, side a on the first
@@ -55,13 +56,27 @@
 !  The two nodes share no element, so the matrix gets a column for the
 !  partner (WEIR_PAIRS_GRAPH); the block is added to the assembled matrix
 !  before the solve and removed after it.
+!
+!  Vertical element walls (IBTYPE 64): a VEW pair is solved here while
+!  it is in weir mode, i.e. not submerged (not coupled), with both nodes
+!  wet and a wet boundary edge next to it on both faces (the test of the
+!  previous-step flux, COMPUTE_INTERNAL_BOUNDARY64_FLUX); otherwise it
+!  passes nothing here. As in that flux, its spilling side must be more
+!  than BARMIN64 (1.2 H0) over the crest (VEW_PAIR_MIN_HEAD); the flow
+!  phases in linearly up to twice that head, so that it stays continuous
+!  for the consistent solve's line. It does not mark nodes for wetting. A VEW node is
+!  often a member of a coupled group (a submerged VEW pair, a condensed
+!  node group) that shares one level: with the lumped GWCE the pair's
+!  correction then goes to every wet member of the group, through the
+!  group's diagonal, and with the consistent GWCE its block goes to the
+!  rows and columns of the groups' representatives.
 !-----------------------------------------------------------------------
 module WEIR_PAIRS
    use ADC_CONSTANTS, only: G
    implicit none
    private
 
-   !...Solve the IBTYPE 4/24 pairs at the new time level (default) or, with
+   !...Solve the IBTYPE 4/24 pairs, and IBTYPE 64 pairs in weir mode, at the new time level (default) or, with
    !   &boundaryControl IMPLICIT_WEIR = .false., take their flux from the
    !   previous step's levels (WEIR_FLUX)
    logical, public :: IMPLICIT_WEIR = .true.
@@ -70,6 +85,11 @@ module WEIR_PAIRS
    !   plus the velocity head of the node's velocity toward the weir, from the
    !   momentum equations at time level n (here and in WEIR_FLUX)
    logical, public :: WEIR_TOTAL_HEAD = .false.
+   !...an IBTYPE 64 pair passes water only while its spilling side is more than
+   !   this over the crest (BARMIN64, 1.2 H0, as the previous-step flux; set in
+   !   WEIR_SETUP), and its full flow from twice this, rising linearly in
+   !   between (PAIR_FLOW)
+   real(8), public :: VEW_PAIR_MIN_HEAD = 0.d0
 
    integer :: NPAIR = -1 !...-1: not set up yet
    logical :: ANY_PAIRS = .false. !...some subdomain has a pair
@@ -79,6 +99,9 @@ module WEIR_PAIRS
    integer, allocatable :: KAT(:) !...number of pairs at each node
    real(8), allocatable :: REACH(:) !...lowest level covering one of a node's elements
    real(8), allocatable :: VHA(:), VHB(:) !...velocity head toward the weir on sides a, b [m]
+   logical, allocatable :: IS64(:) !...the pair is on a vertical element wall (IBTYPE 64)
+   logical, allocatable :: POPEN(:) !...the pair takes part in this step's solve (WEIR_PAIRS_OPEN)
+   integer, allocatable :: P64J(:), P64NV(:) !...its position along the wall and the wall's length
    !...boundary entries whose forcing the pairs supply (skip in QFORCE)
    logical, allocatable, public :: WEIR_PAIR_ENTRY(:)
 
@@ -93,23 +116,24 @@ module WEIR_PAIRS
    real(8), allocatable :: SAVED(:, :) !...matrix entries before the blocks
    logical, allocatable :: LACTIVE(:)
 
-   public :: WEIR_PAIRS_SETUP, WEIR_PAIRS_SYNC_MARKS, WEIR_PAIRS_SOLVE_LUMPED, WEIR_OVERFLOW, &
+   public :: WEIR_PAIRS_SETUP, WEIR_PAIRS_OPEN, WEIR_PAIRS_SYNC_MARKS, WEIR_PAIRS_SOLVE_LUMPED, WEIR_OVERFLOW, &
              WEIR_PAIRS_GRAPH, WEIR_PAIRS_LINEARIZE, WEIR_PAIRS_FINISH
 
 contains
 
    !-----------------------------------------------------------------------
-   !  WEIR_PAIRS_SETUP: build the pair table from the IBTYPE 4/24 boundaries
+   !  WEIR_PAIRS_SETUP: build the pair table from the IBTYPE 4/24 and 64 boundaries
    !-----------------------------------------------------------------------
    subroutine WEIR_PAIRS_SETUP()
-      use BOUNDARIES, only: NBOU, NVELL, NVEL, NBV, LBCODEI, BndLen2O3, BARINHT
-      use MESH, only: NP
+      use BOUNDARIES, only: NBOU, NVELL, NVEL, NBV, IBCONN, LBCODEI, BndLen2O3, BARINHT
+      use MESH, only: NP, LBArray_Pointer
 #ifdef CMPI
       use MESSENGER, only: msg_imax
 #endif
       implicit none
       integer :: I0, K, J, NV, P, IA, IB
       real(8), allocatable :: elen(:)
+      logical :: vew
 
       if (NPAIR >= 0) return
       allocate (WEIR_PAIR_ENTRY(NVEL), elen(NVEL), KAT(NP))
@@ -127,7 +151,7 @@ contains
       do K = 1, NBOU
          NV = NVELL(K)
          select case (LBCODEI(I0 + 1))
-         case (4, 24)
+         case (4, 24, 64)
             do J = 2, NV
                elen(I0 + J - 1) = elen(I0 + J - 1) + 0.75d0*BndLen2O3(I0 + J - 1)
                elen(I0 + J) = elen(I0 + J) + 0.75d0*BndLen2O3(I0 + J - 1)
@@ -135,7 +159,7 @@ contains
                elen(I0 + NV + J) = elen(I0 + NV + J) + 0.75d0*BndLen2O3(I0 + NV + J - 1)
             end do
             do J = 1, NV
-               if (NBV(I0 + J) > 0 .and. NBV(I0 + 2*NV + 1 - J) > 0) NPAIR = NPAIR + 1
+               if (PARTNER(I0, NV, J) > 0) NPAIR = NPAIR + 1
             end do
             I0 = I0 + 2*NV
          case (5, 25)
@@ -145,28 +169,37 @@ contains
          end select
       end do
       allocate (PA(NPAIR), PB(NPAIR), PLEN(NPAIR), NA_NEI(2, NPAIR), NB_NEI(2, NPAIR))
+      allocate (IS64(NPAIR), P64J(NPAIR), P64NV(NPAIR), POPEN(NPAIR))
+      POPEN = .true.
       NA_NEI = 0
       NB_NEI = 0
+      IS64 = .false.
+      P64J = 0
+      P64NV = 0
       P = 0
       I0 = 0
       do K = 1, NBOU
          NV = NVELL(K)
          select case (LBCODEI(I0 + 1))
-         case (4, 24)
+         case (4, 24, 64)
+            vew = LBCODEI(I0 + 1) == 64
             do J = 1, NV
                IA = I0 + J
-               !...the back face is stored in reverse order (mesh.F)
-               IB = I0 + 2*NV + 1 - J
-               if (NBV(IA) <= 0 .or. NBV(IB) <= 0) cycle
+               IB = PARTNER(I0, NV, J)
+               if (IB <= 0) cycle
                P = P + 1
                PA(P) = IA
                PB(P) = IB
                PLEN(P) = 0.5d0*(elen(IA) + elen(IB))
-               if (J > 1) then
+               if (vew) then
+                  IS64(P) = .true.
+                  P64J(P) = J
+                  P64NV(P) = NV
+               else if (J > 1) then
                   NA_NEI(1, P) = NBV(IA - 1)
                   NB_NEI(1, P) = NBV(IB + 1)
                end if
-               if (J < NV) then
+               if (J < NV .and. .not. vew) then
                   NA_NEI(2, P) = NBV(IA + 1)
                   NB_NEI(2, P) = NBV(IB - 1)
                end if
@@ -188,7 +221,87 @@ contains
 #ifdef CMPI
       ANY_PAIRS = msg_imax(merge(1, 0, ANY_PAIRS)) > 0
 #endif
+
+   contains
+
+      !...the entry facing entry I0+J across the barrier, 0 if not held here.
+      !   IBTYPE 4/24: the back face is stored in reverse order (mesh.F);
+      !   IBTYPE 64: the entry of the opposite node (IBCONN).
+      integer function PARTNER(I0, NV, J)
+         integer, intent(IN) :: I0, NV, J
+         PARTNER = 0
+         if (NBV(I0 + J) <= 0) return
+         if (LBCODEI(I0 + 1) == 64) then
+            if (IBCONN(I0 + J) <= 0) return
+            PARTNER = LBArray_Pointer(IBCONN(I0 + J))
+            if (PARTNER > 0) then
+               if (PARTNER <= I0 .or. PARTNER > I0 + 2*NV) PARTNER = 0
+            end if
+            if (PARTNER < 0) PARTNER = 0
+         else
+            if (NBV(I0 + 2*NV + 1 - J) > 0) PARTNER = I0 + 2*NV + 1 - J
+         end if
+      end function PARTNER
+
    end subroutine WEIR_PAIRS_SETUP
+
+   !-----------------------------------------------------------------------
+   !  PAIR_OPEN: whether pair P takes part in this step's solve. An IBTYPE
+   !  64 pair does while it is not submerged and has a wet boundary edge
+   !  next to it on both faces (as COMPUTE_INTERNAL_BOUNDARY64_FLUX tests);
+   !  an IBTYPE 4/24 pair always does.
+   !-----------------------------------------------------------------------
+   logical function PAIR_OPEN(P, NODECODE)
+      use BOUNDARIES, only: NBV, ISSUBMERGED64, BNDEDGE3RD
+      implicit none
+      integer, intent(IN) :: P
+      integer, intent(IN) :: NODECODE(:)
+      integer :: IA, IB
+      PAIR_OPEN = .true.
+      if (.not. IS64(P)) return
+      PAIR_OPEN = .false.
+      IA = PA(P)
+      IB = PB(P)
+      if (ISSUBMERGED64(IA) /= 0 .or. ISSUBMERGED64(IB) /= 0) return
+      if (NODECODE(NBV(IA)) == 0 .or. NODECODE(NBV(IB)) == 0) return
+      !...the edge toward the previous pair (front entries IA-1, IA; the
+      !   back face runs the other way)
+      if (P64J(P) > 1) then
+         if (wet_edge(NBV(IA - 1), BNDEDGE3RD(IA - 1), NBV(IB + 1), BNDEDGE3RD(IB))) PAIR_OPEN = .true.
+      end if
+      if (P64J(P) < P64NV(P)) then
+         if (wet_edge(NBV(IA + 1), BNDEDGE3RD(IA), NBV(IB - 1), BNDEDGE3RD(IB - 1))) PAIR_OPEN = .true.
+      end if
+   contains
+      logical function wet_edge(n11, n12, n21, n22)
+         integer, intent(IN) :: n11, n12, n21, n22
+         wet_edge = .false.
+         if (n11 <= 0 .or. n12 <= 0 .or. n21 <= 0 .or. n22 <= 0) return
+         wet_edge = NODECODE(n11) /= 0 .and. NODECODE(n12) /= 0 .and. &
+                    NODECODE(n21) /= 0 .and. NODECODE(n22) /= 0
+      end function wet_edge
+   end function PAIR_OPEN
+
+   !-----------------------------------------------------------------------
+   !  WEIR_PAIRS_OPEN: the IBTYPE 64 pairs that take part in this step's
+   !  solve (PAIR_OPEN), before the GWCE load takes the flux-boundary
+   !  forcing. Their entries' forcing comes from the pairs; the entries of
+   !  the other IBTYPE 64 pairs keep the previous-step forcing of their
+   !  flux history, (QN2 - QN0)/(2 dt) + tau0 QN1 with QN2 = 0, as the
+   !  previous-step scheme gives a pair that has just been coupled.
+   !-----------------------------------------------------------------------
+   subroutine WEIR_PAIRS_OPEN(NODECODE)
+      implicit none
+      integer, intent(IN) :: NODECODE(:)
+      integer :: P
+      if (NPAIR <= 0) return
+      do P = 1, NPAIR
+         if (.not. IS64(P)) cycle
+         POPEN(P) = PAIR_OPEN(P, NODECODE)
+         WEIR_PAIR_ENTRY(PA(P)) = POPEN(P)
+         WEIR_PAIR_ENTRY(PB(P)) = POPEN(P)
+      end do
+   end subroutine WEIR_PAIRS_OPEN
 
    !-----------------------------------------------------------------------
    !  WEIR_PAIRS_SYNC_MARKS: a ghost node takes its owner's wetting mark.
@@ -240,6 +353,7 @@ contains
       integer, intent(IN) :: NODECODE(:)
       integer :: NA, NB
       real(8) :: crest
+      if (IS64(P)) return
       NA = NBV(PA(P))
       NB = NBV(PB(P))
       if (q > 0.d0) NIBNODECODE(NB) = 1
@@ -279,16 +393,31 @@ contains
    !  crest is lost behind it. The velocity heads are fixed during a step, so
    !  the flow still never falls as the spilling side's level rises.
    !-----------------------------------------------------------------------
-   real(8) pure function PAIR_FLOW(ea, eb, crest, csub, cfree, ramp, asrc, bsrc, va, vb) result(q)
+   real(8) pure function PAIR_FLOW(ea, eb, crest, csub, cfree, ramp, asrc, bsrc, va, vb, hmin) result(q)
       implicit none
       real(8), intent(IN) :: ea, eb, crest, csub, cfree, ramp, va, vb
+      real(8), intent(IN), optional :: hmin !...the spilling side's minimum head (0 if absent)
       logical, intent(IN) :: asrc, bsrc
+      real(8) :: h
+      h = 0.d0
+      if (present(hmin)) h = hmin
       q = 0.d0
       if (ea - crest >= eb - crest) then
-         if (asrc .and. ea > crest) q = ramp*WEIR_OVERFLOW(ea - crest + va, eb - crest, csub, cfree)
+         if (asrc .and. ea > crest + h) q = ramp*WEIR_OVERFLOW(ea - crest + va, eb - crest, csub, cfree) &
+                                            *phase_in(ea - crest)
       else
-         if (bsrc .and. eb > crest) q = -ramp*WEIR_OVERFLOW(eb - crest + vb, ea - crest, csub, cfree)
+         if (bsrc .and. eb > crest + h) q = -ramp*WEIR_OVERFLOW(eb - crest + vb, ea - crest, csub, cfree) &
+                                             *phase_in(eb - crest)
       end if
+   contains
+      !...with a minimum head h, the flow phases in linearly between the heads h
+      !   and 2h, so that it stays continuous (and nondecreasing) in the
+      !   spilling side's level
+      real(8) pure function phase_in(head)
+         real(8), intent(IN) :: head
+         phase_in = 1.d0
+         if (h > 0.d0) phase_in = min(1.d0, (head - h)/h)
+      end function phase_in
    end function PAIR_FLOW
 
    !-----------------------------------------------------------------------
@@ -332,13 +461,38 @@ contains
       end if
    end function CAN_SOURCE
 
+   !...the minimum head of pair P: VEW_PAIR_MIN_HEAD for IBTYPE 64, none for 4/24
+   real(8) function PMINH(P)
+      implicit none
+      integer, intent(IN) :: P
+      PMINH = 0.d0
+      if (IS64(P)) PMINH = VEW_PAIR_MIN_HEAD
+   end function PMINH
+
+   !...a side may spill: IBTYPE 4/24 as CAN_SOURCE; an open IBTYPE 64 pair
+   !   (PAIR_OPEN) has already passed its wet-edge test
+   logical function SOURCE_OK(P, node, nei, nodecode)
+      implicit none
+      integer, intent(IN) :: P, node, nei(2)
+      integer, intent(IN) :: nodecode(:)
+      if (IS64(P)) then
+         SOURCE_OK = nodecode(node) /= 0
+      else
+         SOURCE_OK = CAN_SOURCE(node, nei, nodecode)
+      end if
+   end function SOURCE_OK
+
    !-----------------------------------------------------------------------
    !  WEIR_PAIRS_SOLVE_LUMPED: solve every pair at the new time level after
    !  the lumped GWCE division and correct the increments ETAS of its two
    !  nodes; the solved flux goes to QN2 (positive into the domain).
    !  D is the lumped diagonal, ETA1 the level at n, QN0 the flux at n-1.
+   !  GROOT (optional): each node's coupled group (VEW pairs, condensed
+   !  nodes), by a member, as summed in the lumped GWCE (D and ETAS are the
+   !  group's at every wet member); a pair's correction then goes to the
+   !  whole group.
    !-----------------------------------------------------------------------
-   subroutine WEIR_PAIRS_SOLVE_LUMPED(ETAS, D, ETA1, TAU0V, DT, QN0, QN1, QN2, NODECODE, RAMP)
+   subroutine WEIR_PAIRS_SOLVE_LUMPED(ETAS, D, ETA1, TAU0V, DT, QN0, QN1, QN2, NODECODE, RAMP, GROOT)
       use BOUNDARIES, only: NBV, BARINCFSB, BARINCFSP
       use MESH, only: NP
       implicit none
@@ -347,20 +501,36 @@ contains
       real(8), intent(IN) :: DT, RAMP
       real(8), intent(INOUT) :: QN2(:)
       integer, intent(IN) :: NODECODE(:)
+      integer, intent(IN), optional :: GROOT(:)
       real(8), allocatable :: change(:)
-      integer :: P, NA, NB
+      integer, allocatable :: root(:), kg(:)
+      integer :: P, NA, NB, GA, GB, N
       real(8) :: la, lb, ra, rb, cp, cm, qold, carried, crest, csub, cfree, f, q, tau, qn, xa, xb
       logical :: asrc, bsrc
 
       if (NPAIR <= 0) return
       call SET_VELOCITY_HEADS()
-      allocate (change(NP))
+      allocate (change(NP), root(NP), kg(NP))
       change = 0.d0
+      if (present(GROOT)) then
+         root = GROOT(1:NP)
+      else
+         root = [(N, N=1, NP)]
+      end if
+      !...pairs at each group (at each node without groups)
+      kg = 0
+      do N = 1, NP
+         kg(root(N)) = kg(root(N)) + KAT(N)
+      end do
       do P = 1, NPAIR
          NA = NBV(PA(P))
          NB = NBV(PB(P))
+         GA = root(NA)
+         GB = root(NB)
          QN2(PA(P)) = 0.d0
          QN2(PB(P)) = 0.d0
+         if (.not. POPEN(P)) cycle
+         if (GA == GB) cycle
          if (NODECODE(NA) == 0 .or. NODECODE(NB) == 0) then
             !...wet first, flow next
             la = ETA1(NA)
@@ -376,13 +546,13 @@ contains
          qn = 0.5d0*(QN1(PB(P)) - QN1(PA(P)))
          xa = -PLEN(P)*(TAU0V(NA) - tau)*qn/D(NA)
          xb = PLEN(P)*(TAU0V(NB) - tau)*qn/D(NB)
-         change(NA) = change(NA) + xa
-         change(NB) = change(NB) + xb
+         change(GA) = change(GA) + xa
+         change(GB) = change(GB) + xb
          la = ETA1(NA) + ETAS(NA) + xa
          lb = ETA1(NB) + ETAS(NB) + xb
-         !...a node on k pairs answers each pair k times as strongly
-         ra = dble(KAT(NA))*PLEN(P)/D(NA)
-         rb = dble(KAT(NB))*PLEN(P)/D(NB)
+         !...a node (group) on k pairs answers each pair k times as strongly
+         ra = dble(kg(GA))*PLEN(P)/D(NA)
+         rb = dble(kg(GB))*PLEN(P)/D(NB)
          cp = 0.5d0/DT + 0.5d0*tau
          cm = 0.5d0/DT - 0.5d0*tau
          qold = 0.5d0*(QN0(PB(P)) - QN0(PA(P))) ! a -> b at n-1
@@ -390,27 +560,30 @@ contains
          crest = WEIR_PAIR_CREST(PA(P))
          csub = BARINCFSB(PA(P))
          cfree = BARINCFSP(PA(P))
-         asrc = CAN_SOURCE(NA, NA_NEI(:, P), NODECODE)
-         bsrc = CAN_SOURCE(NB, NB_NEI(:, P), NODECODE)
+         asrc = SOURCE_OK(P, NA, NA_NEI(:, P), NODECODE)
+         bsrc = SOURCE_OK(P, NB, NB_NEI(:, P), NODECODE)
          f = solve_pair()
          q = (f + carried)/cp
          QN2(PA(P)) = -q
          QN2(PB(P)) = q
-         change(NA) = change(NA) - PLEN(P)*f/D(NA)
-         change(NB) = change(NB) + PLEN(P)*f/D(NB)
+         change(GA) = change(GA) - PLEN(P)*f/D(NA)
+         change(GB) = change(GB) + PLEN(P)*f/D(NB)
          call MARK_PAIR(P, la - ra*f, lb + rb*f, q, NODECODE)
       end do
-      do NA = 1, NP
-         if (abs(change(NA)) > 0.d0) ETAS(NA) = ETAS(NA) + change(NA)
+      !...every wet member of a group takes its group's change
+      do N = 1, NP
+         if (root(N) /= N .and. NODECODE(N) == 0) cycle
+         if (abs(change(root(N))) > 0.d0) ETAS(N) = ETAS(N) + change(root(N))
       end do
-      deallocate (change)
+      deallocate (change, root, kg)
 
    contains
 
       real(8) function resid(term)
          real(8), intent(IN) :: term
          resid = term + carried - cp*PAIR_FLOW(la - ra*term, lb + rb*term, crest, &
-                                               csub, cfree, RAMP, asrc, bsrc, VHA(P), VHB(P))
+                                               csub, cfree, RAMP, asrc, bsrc, VHA(P), VHB(P), &
+                                               PMINH(P))
       end function resid
 
       !...the root of resid, as in Cocoa's solve_weir_pair
@@ -538,17 +711,20 @@ contains
    !  pair's block to the matrix COEF (saving the entries it changes) and
    !  its constant part to the load GWCE_LV. ETA1 is the level at n and
    !  ETAS the last step's increment. Pairs at an elevation-specified
-   !  boundary node are left out (their rows are fixed).
+   !  boundary node are left out (their rows are fixed). GMAP (optional):
+   !  each node's coupled group representative (VEW1D), whose row and
+   !  column the node's equation has been summed into.
    !-----------------------------------------------------------------------
-   subroutine WEIR_PAIRS_LINEARIZE(COEF, GWCE_LV, ETA1, ETAS, TAU0V, DT, QN0, QN1, NODECODE, RAMP)
+   subroutine WEIR_PAIRS_LINEARIZE(COEF, GWCE_LV, ETA1, ETAS, TAU0V, DT, QN0, QN1, NODECODE, RAMP, GMAP)
       use BOUNDARIES, only: NBV, BARINCFSB, BARINCFSP, NETA, NBD
       use MESH, only: NP
       implicit none
       real(8), intent(INOUT) :: COEF(:, :), GWCE_LV(:)
       real(8), intent(IN) :: ETA1(:), ETAS(:), TAU0V(:), QN0(:), QN1(:), DT, RAMP
       integer, intent(IN) :: NODECODE(:)
+      integer, intent(IN), optional :: GMAP(:)
       logical, allocatable, save :: ISOBC(:)
-      integer :: P, NA, NB
+      integer :: P, NA, NB, RA, RB
       real(8) :: ea, eb, span, up, dn, q0, s, cp, cm, tau, qold, m, rhs, crest, csub, cfree, qn
       logical :: asrc, bsrc
 
@@ -567,30 +743,42 @@ contains
          LBASE(P) = 0.d0
          NA = NBV(PA(P))
          NB = NBV(PB(P))
+         RA = NA
+         RB = NB
+         if (present(GMAP)) then
+            RA = GMAP(NA)
+            RB = GMAP(NB)
+         end if
+         if (.not. POPEN(P)) cycle
+         if (RA == RB) cycle
          if (NODECODE(NA) == 0 .or. NODECODE(NB) == 0) cycle
-         if (ISOBC(NA) .or. ISOBC(NB)) cycle
+         if (ISOBC(RA) .or. ISOBC(RB)) cycle
+         if (present(GMAP)) then
+            SLOTA(P) = SLOT_OF(RA, RB)
+            SLOTB(P) = SLOT_OF(RB, RA)
+         end if
          if (SLOTA(P) == 0 .or. SLOTB(P) == 0) cycle
          crest = WEIR_PAIR_CREST(PA(P))
          csub = BARINCFSB(PA(P))
          cfree = BARINCFSP(PA(P))
-         asrc = CAN_SOURCE(NA, NA_NEI(:, P), NODECODE)
-         bsrc = CAN_SOURCE(NB, NB_NEI(:, P), NODECODE)
+         asrc = SOURCE_OK(P, NA, NA_NEI(:, P), NODECODE)
+         bsrc = SOURCE_OK(P, NB, NB_NEI(:, P), NODECODE)
          !...the levels the last increment extrapolates to, and the span the
-         !   last step moved their difference
-         ea = ETA1(NA) + ETAS(NA)
-         eb = ETA1(NB) + ETAS(NB)
-         span = max(abs(ETAS(NA) - ETAS(NB)), 1.d-6)
+         !   last step moved their difference (a group's at its representative)
+         ea = ETA1(RA) + ETAS(RA)
+         eb = ETA1(RB) + ETAS(RB)
+         span = max(abs(ETAS(RA) - ETAS(RB)), 1.d-6)
          tau = 0.5d0*(TAU0V(NA) + TAU0V(NB))
          cp = 0.5d0/DT + 0.5d0*tau
          cm = 0.5d0/DT - 0.5d0*tau
          if (ea > crest .or. eb > crest) then
             up = PAIR_FLOW(ea + 0.5d0*span, eb - 0.5d0*span, crest, csub, cfree, RAMP, asrc, bsrc, &
-                           VHA(P), VHB(P))
+                           VHA(P), VHB(P), PMINH(P))
             dn = PAIR_FLOW(ea - 0.5d0*span, eb + 0.5d0*span, crest, csub, cfree, RAMP, asrc, bsrc, &
-                           VHA(P), VHB(P))
+                           VHA(P), VHB(P), PMINH(P))
             s = (up - dn)/(2.d0*span)
             !...the line's flow at the difference at n
-            q0 = 0.5d0*(up + dn) + s*((ETA1(NA) - ETA1(NB)) - (ea - eb))
+            q0 = 0.5d0*(up + dn) + s*((ETA1(RA) - ETA1(RB)) - (ea - eb))
          else
             s = 0.d0
             q0 = 0.d0
@@ -599,60 +787,82 @@ contains
          m = cp*PLEN(P)*s
          rhs = PLEN(P)*(cp*q0 - cm*qold)
 
-         SAVED(1, P) = COEF(NA, 1)
-         SAVED(2, P) = COEF(NA, SLOTA(P))
-         SAVED(3, P) = COEF(NB, 1)
-         SAVED(4, P) = COEF(NB, SLOTB(P))
-         COEF(NA, 1) = COEF(NA, 1) + m
-         COEF(NA, SLOTA(P)) = COEF(NA, SLOTA(P)) - m
-         COEF(NB, 1) = COEF(NB, 1) + m
-         COEF(NB, SLOTB(P)) = COEF(NB, SLOTB(P)) - m
-         GWCE_LV(NA) = GWCE_LV(NA) - rhs
-         GWCE_LV(NB) = GWCE_LV(NB) + rhs
+         SAVED(1, P) = COEF(RA, 1)
+         SAVED(2, P) = COEF(RA, SLOTA(P))
+         SAVED(3, P) = COEF(RB, 1)
+         SAVED(4, P) = COEF(RB, SLOTB(P))
+         COEF(RA, 1) = COEF(RA, 1) + m
+         COEF(RA, SLOTA(P)) = COEF(RA, SLOTA(P)) - m
+         COEF(RB, 1) = COEF(RB, 1) + m
+         COEF(RB, SLOTB(P)) = COEF(RB, SLOTB(P)) - m
+         GWCE_LV(RA) = GWCE_LV(RA) - rhs
+         GWCE_LV(RB) = GWCE_LV(RB) + rhs
          !...each side's own tau0: (tau0_j - mean) q(n), explicit
          qn = 0.5d0*(QN1(PB(P)) - QN1(PA(P)))
-         GWCE_LV(NA) = GWCE_LV(NA) - PLEN(P)*(TAU0V(NA) - tau)*qn
-         GWCE_LV(NB) = GWCE_LV(NB) + PLEN(P)*(TAU0V(NB) - tau)*qn
+         GWCE_LV(RA) = GWCE_LV(RA) - PLEN(P)*(TAU0V(NA) - tau)*qn
+         GWCE_LV(RB) = GWCE_LV(RB) + PLEN(P)*(TAU0V(NB) - tau)*qn
          LSLOPE(P) = s
          LBASE(P) = q0
          LACTIVE(P) = .true.
       end do
    end subroutine WEIR_PAIRS_LINEARIZE
 
+   !...the column of node j in row i of the matrix (0: none)
+   integer function SLOT_OF(i, j)
+      implicit none
+      integer, intent(IN) :: i, j
+      integer :: k
+      SLOT_OF = 0
+      do k = 2, NNEIGHW(i)
+         if (NEITABW(i, k) == j) then
+            SLOT_OF = k
+            return
+         end if
+      end do
+   end function SLOT_OF
+
    !-----------------------------------------------------------------------
    !  WEIR_PAIRS_FINISH: after the consistent GWCE solve, remove the blocks
    !  from COEF (in reverse order, restoring the saved entries) and write
-   !  each pair's flux at the solved increments ETAS to QN2.
+   !  each pair's flux at the solved increments ETAS to QN2 (GMAP as in
+   !  WEIR_PAIRS_LINEARIZE; a group's increment is its representative's).
    !-----------------------------------------------------------------------
-   subroutine WEIR_PAIRS_FINISH(COEF, ETAS, ETA1, QN2, NODECODE)
+   subroutine WEIR_PAIRS_FINISH(COEF, ETAS, ETA1, QN2, NODECODE, GMAP)
       use BOUNDARIES, only: NBV
       implicit none
       real(8), intent(INOUT) :: COEF(:, :), QN2(:)
       real(8), intent(IN) :: ETAS(:), ETA1(:)
       integer, intent(IN) :: NODECODE(:)
+      integer, intent(IN), optional :: GMAP(:)
       real(8) :: la, lb
-      integer :: P, NA, NB
+      integer :: P, NA, NB, RA, RB
       real(8) :: q
 
       if (NPAIR <= 0) return
       do P = NPAIR, 1, -1
          NA = NBV(PA(P))
          NB = NBV(PB(P))
+         RA = NA
+         RB = NB
+         if (present(GMAP)) then
+            RA = GMAP(NA)
+            RB = GMAP(NB)
+         end if
          QN2(PA(P)) = 0.d0
          QN2(PB(P)) = 0.d0
-         la = ETA1(NA)
-         lb = ETA1(NB)
-         if (NODECODE(NA) /= 0) la = la + ETAS(NA)
-         if (NODECODE(NB) /= 0) lb = lb + ETAS(NB)
+         la = ETA1(RA)
+         lb = ETA1(RB)
+         if (NODECODE(NA) /= 0) la = la + ETAS(RA)
+         if (NODECODE(NB) /= 0) lb = lb + ETAS(RB)
          if (.not. LACTIVE(P)) then
             call MARK_PAIR(P, la, lb, 0.d0, NODECODE)
             cycle
          end if
-         COEF(NB, SLOTB(P)) = SAVED(4, P)
-         COEF(NB, 1) = SAVED(3, P)
-         COEF(NA, SLOTA(P)) = SAVED(2, P)
-         COEF(NA, 1) = SAVED(1, P)
-         q = LBASE(P) + LSLOPE(P)*(ETAS(NA) - ETAS(NB))
+         COEF(RB, SLOTB(P)) = SAVED(4, P)
+         COEF(RB, 1) = SAVED(3, P)
+         COEF(RA, SLOTA(P)) = SAVED(2, P)
+         COEF(RA, 1) = SAVED(1, P)
+         q = LBASE(P) + LSLOPE(P)*(ETAS(RA) - ETAS(RB))
          QN2(PA(P)) = -q
          QN2(PB(P)) = q
          call MARK_PAIR(P, la, lb, q, NODECODE)

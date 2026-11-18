@@ -96,6 +96,8 @@ C******************************************************************************
 C     Arrays used by JCG iterative solver
       integer :: nw
       integer, allocatable :: iwksp(:)
+!     coupled groups of the lumped GWCE, for the internal weir pairs
+      integer, allocatable :: wproot(:)
       real(8), allocatable :: wksp(:)
       integer, allocatable :: iparm(:)
       real(8), allocatable :: rparm(:)
@@ -361,8 +363,9 @@ C... SB
      &     NSGROUPS, NSGROUPS_GBL, SGELEM, GMAP, NeiTabG, NNeighG,
      &     VEW_LUMP_MASS,
      &     UPDATE_ACTIVE_GROUPS, GROUP_LOAD_SUM, GROUP_COPY_INCREMENT,
-     &     GROUP_SLOT, GROUP_IMAX
+     &     GROUP_SLOT, GROUP_IMAX, LUMPED_GROUP_ROOTS
       USE WEIR_PAIRS, ONLY : IMPLICIT_WEIR, WEIR_PAIRS_SETUP,
+     &   WEIR_PAIRS_OPEN,
      &   WEIR_PAIRS_SOLVE_LUMPED, WEIR_PAIR_ENTRY, WEIR_PAIRS_LINEARIZE,
      &   WEIR_PAIRS_FINISH, WEIR_PAIRS_SYNC_MARKS, MNEIW, NEITABW
 C... SB
@@ -1906,6 +1909,8 @@ C...  (WEIR_PAIRS): their forcing is left out here and added with the
 C...  solved flux after the GWCE division
 C     every subdomain, for the collective in the setup
       CALL WEIR_PAIRS_SETUP()
+C     VEW pairs in weir mode this step (IBTYPE 64)
+      CALL WEIR_PAIRS_OPEN(NODECODE)
       IF((NFLUXF.EQ.1).OR.(NFLUXB.EQ.1).OR.(NFLUXIB.EQ.1)
      &     .OR.(NFLUXGBC.EQ.1).OR.(NFLUXRBC.EQ.1)) THEN
          QFORCEJ=0.d0
@@ -2172,11 +2177,22 @@ C        tolerance of every later solve
          RPARM(1)=CONVCR
          IF (ALLOCATED(NEITABW)) THEN
 C           internal weir pairs: their blocks in the matrix for this solve
-            CALL WEIR_PAIRS_LINEARIZE(COEF, GWCE_LV, ETA1, ETAS,
-     &         Tau0VAR, DT, QN0, QN1, NODECODE, RampIntFlux)
+            IF (CGROUPS) THEN
+C              coupled groups: the pair blocks go to the representatives
+               CALL WEIR_PAIRS_LINEARIZE(COEF, GWCE_LV, ETA1, ETAS,
+     &            Tau0VAR, DT, QN0, QN1, NODECODE, RampIntFlux, GMAP)
+            ELSE
+               CALL WEIR_PAIRS_LINEARIZE(COEF, GWCE_LV, ETA1, ETAS,
+     &            Tau0VAR, DT, QN0, QN1, NODECODE, RampIntFlux)
+            ENDIF
             CALL JCG(NP,MNP,MNEIW,NEITABW,COEF,GWCE_LV,ETAS,
      &           IWKSP,NW,WKSP,IPARM,RPARM,IER)
-            CALL WEIR_PAIRS_FINISH(COEF, ETAS, ETA1, QN2, NODECODE)
+            IF (CGROUPS) THEN
+               CALL WEIR_PAIRS_FINISH(COEF, ETAS, ETA1, QN2, NODECODE,
+     &            GMAP)
+            ELSE
+               CALL WEIR_PAIRS_FINISH(COEF, ETAS, ETA1, QN2, NODECODE)
+            ENDIF
          ELSE
             CALL JCG(NP,MNP,MNEIG,NeiTabG,COEF,GWCE_LV,ETAS,
      &           IWKSP,NW,WKSP,IPARM,RPARM,IER)
@@ -2196,9 +2212,20 @@ C           internal weir pairs: their blocks in the matrix for this solve
             ETAS(I) = GWCE_LV(I) * RDIAG
          ENDDO
 C...     Internal weir pairs: flux with both levels at the new time level
-         IF (ALLOCATED(WEIR_PAIR_ENTRY)) CALL WEIR_PAIRS_SOLVE_LUMPED(
-     &      ETAS, COEFDTemp, ETA1, Tau0VAR, DT, QN0, QN1, QN2, NODECODE,
-     &      RampIntFlux)
+         IF (ALLOCATED(WEIR_PAIR_ENTRY)) THEN
+            IF ((NFLUXIB64_GBL.GT.0).OR.LoadCondensedNodes) THEN
+C              VEW pairs and condensed nodes: a pair's correction goes to
+C              the whole coupled group its node is in
+               IF (.NOT.ALLOCATED(WPROOT)) ALLOCATE(WPROOT(MNP))
+               CALL LUMPED_GROUP_ROOTS(WPROOT)
+               CALL WEIR_PAIRS_SOLVE_LUMPED(ETAS, COEFDTemp, ETA1,
+     &            Tau0VAR, DT, QN0, QN1, QN2, NODECODE, RampIntFlux,
+     &            WPROOT)
+            ELSE
+               CALL WEIR_PAIRS_SOLVE_LUMPED(ETAS, COEFDTemp, ETA1,
+     &            Tau0VAR, DT, QN0, QN1, QN2, NODECODE, RampIntFlux)
+            ENDIF
+         ENDIF
          NUMITR=0
          DO I=1,NP
             ETA2(I)=NODECODE(I)*(ETAS(I)+dynamicWaterLevelCorrectionDelta(I))+ETA1(I) !COMPUTE NEW ELEVATIONS tgaContOffset

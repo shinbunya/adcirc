@@ -37,7 +37,7 @@ module vew1d
              VEW_ROTATE_VELOCITY, VEW_LUMP_MASS, &
              SETUP_COUPLED_GROUPS, UPDATE_ACTIVE_GROUPS, GROUP_LOAD_SUM, GROUP_COPY_INCREMENT, &
              GROUP_SLOT, NSGROUPS, NSGROUPS_GBL, ISSGMEMBER, SGELEM, GMAP, NeiTabG, NNeighG, &
-             GROUP_IMAX
+             GROUP_IMAX, LUMPED_GROUP_ROOTS
 
    !...VEW_ROTATE_VELOCITY (boundaryControl, default off): rotate the element velocities and
    !   fluxes at two-node condensed groups along uncoupled VEW or land boundaries to the stream
@@ -461,6 +461,83 @@ contains
          if (found) exit
       end do
    end function FIND_IB2
+
+   !-------------------------------------------------------------
+   !  LUMPED_GROUP_ROOTS: the coupled groups of this step as the lumped GWCE sums them (VEW pairs
+   !  that are submerged with both nodes wet, and the wet members of each condensed node group):
+   !  ROOT(I) is a member of node I's group, the same for all members, and I for a node outside any
+   !  group. For the internal weir pairs solved after the lumped GWCE division (WEIR_PAIRS).
+   !-------------------------------------------------------------
+   subroutine LUMPED_GROUP_ROOTS(ROOT)
+      use MESH, only: NP
+      use GLOBAL, only: NODECODE
+      use BOUNDARIES, only: NBOU, NVELL, NBV, IBCONN, LBCODEI, ISSUBMERGED64
+      use NodalAttributes, only: LoadCondensedNodes, NListCondensedNodes, &
+                                 NNodesListCondensedNodes, ListCondensedNodes
+      implicit none
+      integer, intent(OUT) :: ROOT(:)
+      integer :: I, J, K, L, N1, N2
+
+      do I = 1, NP
+         ROOT(I) = I
+      end do
+      I = 0
+      do K = 1, NBOU
+         select case (LBCODEI(I + 1))
+         case (64)
+            do J = 1, NVELL(K)
+               I = I + 1
+               if (ISSUBMERGED64(I) == 0) cycle
+               N1 = NBV(I)
+               N2 = IBCONN(I)
+               if (N1 <= 0 .or. N2 <= 0) cycle
+               if (NODECODE(N1) /= 0 .and. NODECODE(N2) /= 0) call join(N1, N2)
+            end do
+            I = I + NVELL(K)
+         case (4, 24, 5, 25)
+            I = I + NVELL(K)*2
+         case default
+            I = I + NVELL(K)
+         end select
+      end do
+      if (LoadCondensedNodes) then
+         do K = 1, NListCondensedNodes
+            N1 = 0
+            do L = 1, NNodesListCondensedNodes(K)
+               N2 = ListCondensedNodes(K, L)
+               if (N2 <= 0) cycle
+               if (NODECODE(N2) == 0) cycle
+               if (N1 == 0) then
+                  N1 = N2
+               else
+                  call join(N1, N2)
+               end if
+            end do
+         end do
+      end if
+      do I = 1, NP
+         ROOT(I) = find(I)
+      end do
+
+   contains
+
+      integer function find(N)
+         integer, intent(IN) :: N
+         find = N
+         do while (ROOT(find) /= find)
+            find = ROOT(find)
+         end do
+      end function find
+
+      subroutine join(A, B)
+         integer, intent(IN) :: A, B
+         integer :: RA, RB
+         RA = find(A)
+         RB = find(B)
+         if (RA /= RB) ROOT(max(RA, RB)) = min(RA, RB)
+      end subroutine join
+
+   end subroutine LUMPED_GROUP_ROOTS
 
    !-------------------------------------------------------------
    !  SETUP_COUPLED_GROUPS: static groups and the GWCE neighbour table for the consistent-mass GWCE.

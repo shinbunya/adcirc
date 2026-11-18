@@ -522,7 +522,8 @@ contains
 !>
 !> Sets the submergence flags (ISSUBMERGED64) from the front side of a
 !> vertical element wall barrier (LBCODE=64), which also sets the paired
-!> back side flags, then computes the normal flow (QN2) on both sides.
+!> back side flags, then computes the normal flow (QN2) on both sides,
+!> or, with IMPLICIT_WEIR, leaves it to the pairs solved in the GWCE.
 !>
 !> @param[in] K       Boundary segment number
 !> @param[in] I0      Flow boundary index before the segment
@@ -531,7 +532,10 @@ contains
 !-----------------------------------------------------------------------
    subroutine vewBarrierSegment(K, I0, N, TimeLoc)
       use global, only: QN2
-      use WEIR_FLUX, only: SET_SUBMERGED64_AT, COMPUTE_INTERNAL_BOUNDARY64_FLUX
+      use WEIR_FLUX, only: SET_SUBMERGED64_AT, COMPUTE_INTERNAL_BOUNDARY64_FLUX, &
+                           UPDATE_INTERNAL_BARRIER_CREST
+      use WEIR, only: BARINHT2
+      use WEIR_PAIRS, only: IMPLICIT_WEIR, WEIR_PAIR_CREST
       implicit none
 
       integer, intent(in) :: K, I0, N
@@ -544,7 +548,15 @@ contains
 
       do J = 1, 2*N
          I = I0 + J
-         call COMPUTE_INTERNAL_BOUNDARY64_FLUX(I, J, K, TimeLoc, QN2(I))
+         if (IMPLICIT_WEIR) then
+            ! pairs in weir mode are solved at the new time level in the GWCE
+            ! (WEIR_PAIRS), which writes their flux; here only the crest
+            call UPDATE_INTERNAL_BARRIER_CREST(I, TimeLoc)
+            QN2(I) = 0d0
+         else
+            call COMPUTE_INTERNAL_BOUNDARY64_FLUX(I, J, K, TimeLoc, QN2(I))
+         end if
+         if (allocated(WEIR_PAIR_CREST)) WEIR_PAIR_CREST(I) = BARINHT2(I)
       end do
 
    end subroutine vewBarrierSegment

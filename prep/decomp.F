@@ -712,8 +712,11 @@ C     member of such a group, all members and all elements around them
 C     (src/vew1d.F90, SETUP_COUPLED_GROUPS). This builds the static
 C     groups over the full domain: connected sets under all weir/VEW
 C     pairs (IBTYPE 4/24/64) and all condensed node groups (fort.13
-C     attribute condensed_nodes). The lumped GWCE needs no closure and
-C     its decomposition is left as it was.
+C     attribute condensed_nodes). The lumped GWCE needs it only for VEW
+C     pairs in weir mode solved at the new time level (IMPLICIT_WEIR,
+C     src/weir_pairs.F90), whose correction goes to a whole group;
+C     without IBTYPE 64 boundaries, or with IMPLICIT_WEIR = .false., the
+C     lumped GWCE's decomposition is left as it was.
 C----------------------------------------------------------------------
       SUBROUTINE PREP_GROUPS()
       USE PRE_GLOBAL
@@ -722,7 +725,7 @@ C----------------------------------------------------------------------
       INTEGER :: NODE, MEMB, NGROUPS
       REAL(8) :: VALS(64)
       CHARACTER(len=80) :: LINE, NAMES(64)
-      LOGICAL :: FOUND, CONSISTENT
+      LOGICAL :: FOUND, CONSISTENT, VEW
 
       IF (GROUPS_BUILT) RETURN
       GROUPS_BUILT = .TRUE.
@@ -732,7 +735,11 @@ C     consistent GWCE: IM digit 6 /= 2 for 6-digit IM, any other IM
       ELSE
          CONSISTENT = .TRUE.
       ENDIF
-      IF (.NOT.CONSISTENT) RETURN
+      VEW = .FALSE.
+      DO K = 1, NBOU
+         IF (IBTYPE(K).EQ.64) VEW = .TRUE.
+      ENDDO
+      IF (.NOT.(CONSISTENT .OR. (VEW .AND. IMPLICIT_WEIR))) RETURN
       ALLOCATE(GROOT(NNODG), GSIZE(NNODG), GTOUCH(NNODG))
       DO N = 1, NNODG
          GROOT(N) = N
@@ -791,7 +798,7 @@ C     condensed node groups from the full-domain fort.13
          IF (GROOT(N).EQ.N .AND. GSIZE(N).GT.1) NGROUPS = NGROUPS + 1
       ENDDO
       GCLOSURE = (NGROUPS.GT.0)
-      IF (GCLOSURE) WRITE(*,'(A,I0,A)') 'INFO: Consistent GWCE: ',
+      IF (GCLOSURE) WRITE(*,'(A,I0,A)') 'INFO: ',
      &   NGROUPS, ' coupled node groups (weir/VEW pairs, condensed '
      &   //'nodes) are kept whole in every subdomain that holds them.'
 
