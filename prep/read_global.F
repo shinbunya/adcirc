@@ -582,11 +582,8 @@ C.....tcm v52.30.01 added for Smag_Control
      &  dynamicWaterLevelCorrectionRampStart, dynamicWaterLevelCorrectionRampEnd,
      &  dynamicWaterLevelCorrectionRampReferenceTime
 
-C.....Control for VEW1D channels 11/06/2023 sb
-      NAMELIST /VEW1DChannelControl/ activateVEW1DChannelWetPerimeter,
-     &  BARMIN64_SUBM, BARMIN64_NOSUBM, BARMIN64_SLIM,
-     &  BARSLIM64_ELEM, BARSLIM64_EDGE
-      NAMELIST /boundaryControl/ IMPLICIT_WEIR, WEIR_TOTAL_HEAD
+C.....Control for VEW1D channels and internal barriers: namelists VEW1DChannelControl and
+C     boundaryControl in PRE_GLOBAL
 
       LOG_SCOPE_TRACED("read15", READ_GLOBAL_TRACING)
 c.....tcm v51.20.03 initialize external station location specifications
@@ -793,6 +790,14 @@ c..
      &         'The VEW1DChannelControl namelist was not found.')
       endif
       rewind(15)  !Return to the top of the fort.15 file
+C     boundaryControl names of the VEW options take precedence over
+C     VEW1DChannelControl (same mapping as in read_input.F)
+      VEW_WET_PERIMETER = activateVEW1DChannelWetPerimeter
+      VEW_SUBMERGE_DEPTH = BARMIN64_NOSUBM
+      VEW_STAY_SUBMERGED_DEPTH = BARMIN64_SUBM
+      VEW_SUBMERGE_DEPTH_ANY_SLOPE = BARMIN64_SLIM
+      VEW_SUBMERGE_SLOPE_ELEM = BARSLIM64_ELEM
+      VEW_SUBMERGE_SLOPE_EDGE = BARSLIM64_EDGE
       read(unit=15,nml=boundaryControl,iostat=ios)
       if ( ios.ge.0) then
          foundBoundaryControlNamelist = .true.

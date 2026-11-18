@@ -3016,7 +3016,7 @@ nspool_TVW
 .. _boundaryControl:
 
 boundaryControl
-   Fortran namelist for flux boundary options: :ref:`IMPLICIT_WEIR <IMPLICIT_WEIR>` and :ref:`WEIR_TOTAL_HEAD <WEIR_TOTAL_HEAD>`. All entries are optional. In parallel runs, adcprep writes the namelist to each subdomain fort.15 file.
+   Fortran namelist for flux boundary options: :ref:`IMPLICIT_WEIR <IMPLICIT_WEIR>` and :ref:`WEIR_TOTAL_HEAD <WEIR_TOTAL_HEAD>` for internal barriers, and the vertical element wall (IBTYPE 64) options :ref:`VEW_WET_PERIMETER <VEW_WET_PERIMETER>`, :ref:`VEW_SUBMERGE_DEPTH <VEW_SUBMERGE_DEPTH>`, :ref:`VEW_STAY_SUBMERGED_DEPTH <VEW_STAY_SUBMERGED_DEPTH>`, :ref:`VEW_SUBMERGE_DEPTH_ANY_SLOPE <VEW_SUBMERGE_DEPTH_ANY_SLOPE>`, :ref:`VEW_SUBMERGE_SLOPE_ELEM <VEW_SUBMERGE_SLOPE_ELEM>`, :ref:`VEW_SUBMERGE_SLOPE_EDGE <VEW_SUBMERGE_SLOPE_EDGE>` and :ref:`VEW_CORNER_DEPTH <VEW_CORNER_DEPTH>`. All entries are optional. The first six VEW options are also read from the earlier VEW1DChannelControl namelist under the names activateVEW1DChannelWetPerimeter, BARMIN64_NOSUBM, BARMIN64_SUBM, BARMIN64_SLIM, BARSLIM64_ELEM and BARSLIM64_EDGE; a value given in boundaryControl takes precedence. In parallel runs, adcprep writes all of them to each subdomain fort.15 file in boundaryControl.
 
 .. _IMPLICIT_WEIR:
 
@@ -3027,6 +3027,41 @@ IMPLICIT_WEIR
 
 WEIR_TOTAL_HEAD
    Optional logical value (:ref:`boundaryControl <boundaryControl>`), default .false.: the spilling side of an internal barrier node pair (IBTYPE 4 and 24, and the weirs of IBTYPE 5 and 25) reads its total head, its level above the crest plus the velocity head of the node's velocity toward the weir (the component along the barrier's outward normal, from the momentum equations at the previous time step). The lower side keeps its level, since the velocity that leaves over the crest is lost behind it. The velocity head is fixed during a time step, so the flux still never falls as the spilling side's level rises, and any crest height, including a crest at the bed, is allowed. This holds for both the new time level scheme (:ref:`IMPLICIT_WEIR <IMPLICIT_WEIR>` = .true.) and the previous time step scheme; in the latter the levels still decide the flow direction and whether flow passes. With .false. the spilling side reads its level alone.
+
+.. _VEW_WET_PERIMETER:
+
+VEW_WET_PERIMETER
+   Optional logical value (:ref:`boundaryControl <boundaryControl>`), default .false.: in channels modeled with vertical element walls and the :ref:`condensed_nodes` nodal attribute, account for the wet perimeter in the bottom friction. Earlier name: activateVEW1DChannelWetPerimeter (VEW1DChannelControl).
+
+.. _VEW_SUBMERGE_DEPTH:
+
+VEW_SUBMERGE_DEPTH
+   Optional real value in m (:ref:`boundaryControl <boundaryControl>`), default the larger of 0.2 and 2 times H0: depth over the wall top at which a vertical element wall node pair that is not submerged becomes submerged, i.e. its two sides are coupled. Earlier name: BARMIN64_NOSUBM (VEW1DChannelControl).
+
+.. _VEW_STAY_SUBMERGED_DEPTH:
+
+VEW_STAY_SUBMERGED_DEPTH
+   Optional real value in m (:ref:`boundaryControl <boundaryControl>`), default the larger of 0.2 and 2 times H0: depth over the wall top above which a submerged vertical element wall node pair stays submerged. Earlier name: BARMIN64_SUBM (VEW1DChannelControl).
+
+.. _VEW_SUBMERGE_DEPTH_ANY_SLOPE:
+
+VEW_SUBMERGE_DEPTH_ANY_SLOPE
+   Optional real value in m (:ref:`boundaryControl <boundaryControl>`), default 0.5: depth over the wall top above which a vertical element wall node pair is submerged whatever the water surface slope. Earlier name: BARMIN64_SLIM (VEW1DChannelControl).
+
+.. _VEW_SUBMERGE_SLOPE_ELEM:
+
+VEW_SUBMERGE_SLOPE_ELEM
+   Optional real value (:ref:`boundaryControl <boundaryControl>`), default 4e-4: water surface slope over an element at a vertical element wall above which the node pair is not submerged, below :ref:`VEW_SUBMERGE_DEPTH_ANY_SLOPE <VEW_SUBMERGE_DEPTH_ANY_SLOPE>`. Earlier name: BARSLIM64_ELEM (VEW1DChannelControl).
+
+.. _VEW_SUBMERGE_SLOPE_EDGE:
+
+VEW_SUBMERGE_SLOPE_EDGE
+   Optional real value (:ref:`boundaryControl <boundaryControl>`), default 1e-4: water surface slope along the wall edge above which the node pair is not submerged, below :ref:`VEW_SUBMERGE_DEPTH_ANY_SLOPE <VEW_SUBMERGE_DEPTH_ANY_SLOPE>`. Earlier name: BARSLIM64_EDGE (VEW1DChannelControl).
+
+.. _VEW_CORNER_DEPTH:
+
+VEW_CORNER_DEPTH
+   Optional real value in m (:ref:`boundaryControl <boundaryControl>`), default the larger of 0.2 and 2 times H0: total depth at the wall top below which a submerged vertical element wall node pair whose wall-top node has fewer than three wet neighbours, or a steep water surface along the wall, is no longer submerged.
 
 .. _TVW:
 

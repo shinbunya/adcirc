@@ -2436,21 +2436,11 @@ c...     tcm v52.30.01 additions for Smag_Control Namelist
      &       ', dynamicWaterLevelCorrectionRampEnd=',dynamicWaterLevelCorrectionRampEnd,'  /'
          endif
 
-C....    SB VEW1D channel control namelist
-         if (foundVEW1DChannelControlNamelist) then
-            write(15,'(a,l,a,ES24.16E3,a,ES24.16E3,a,ES24.16E3,a,ES24.16E3,a,ES24.16E3,a)')
-     &       '&VEW1DChannelControl activateVEW1DChannelWetPerimeter=',
-     &       activateVEW1DChannelWetPerimeter,
-     &       ', barmin64_subm=',BARMIN64_SUBM,
-     &       ', barmin64_nosubm=',BARMIN64_NOSUBM,
-     &       ', barmin64_slim=',BARMIN64_SLIM,
-     &       ', barslim64_elem=',BARSLIM64_ELEM,
-     &       ', barslim64_edge=',BARSLIM64_EDGE,
-     &       ' /'
-         endif
-         if (foundBoundaryControlNamelist) then
-            write(15,'(a,l1,a,l1,a)') '&boundaryControl IMPLICIT_WEIR=',
-     &       IMPLICIT_WEIR, ', WEIR_TOTAL_HEAD=', WEIR_TOTAL_HEAD, ' /'
+C....    SB VEW1D channel and internal barrier options: all of them
+C        under their boundaryControl names, which take precedence
+         if (foundVEW1DChannelControlNamelist.or.
+     &       foundBoundaryControlNamelist) then
+            write(15,nml=boundaryControl)
          endif
 
 C...     wjp additions for WarnElev Namelist

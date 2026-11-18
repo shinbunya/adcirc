@@ -61,12 +61,12 @@ ADCIRC includes several special features for more accurate modeling of VEW chann
 .. _wet_perimeter_consideration:
 
 Wet Perimeter Consideration
-   For channels modeled with both vertical element walls and :ref:`condensed_nodes` nodal attribute, ADCIRC can account for the wet perimeter in calculating bottom friction. This is activated through the VEW1DChannelControl namelist:
+   For channels modeled with both vertical element walls and :ref:`condensed_nodes` nodal attribute, ADCIRC can account for the wet perimeter in calculating bottom friction. This is activated through the boundaryControl namelist (:ref:`VEW_WET_PERIMETER <VEW_WET_PERIMETER>`; the earlier ``&VEW1DChannelControl activateVEW1DChannelWetPerimeter = .true. /`` is still read):
 
    .. code-block:: fortran
 
-      &VEW1DChannelControl
-         activateVEW1DChannelWetPerimeter = .true.
+      &boundaryControl
+         VEW_WET_PERIMETER = .true.
       /
 
    When enabled, this feature calculates the friction based on the rectangular cross-section of the channel, accounting for both the bed and the vertical walls in the total wetted perimeter. This provides more accurate representation of channel hydraulics, especially for narrow, deep channels.

@@ -130,7 +130,7 @@ Casey 251212: Adding time control.
       USE WRITE_OUTPUT, ONLY : outputNodeCode, outputNOFF
       USE HARM
       USE WEIR, ONLY: BARMIN64_SUBM, BARMIN64_NOSUBM, BARMIN64_SLIM,
-     &   BARSLIM64_ELEM, BARSLIM64_EDGE
+     &   BARMIN64_CORNER, BARSLIM64_ELEM, BARSLIM64_EDGE
 
       USE WEIR, ONLY: FOUND_TVW_NML
       USE WEIR_PAIRS, ONLY: IMPLICIT_WEIR, WEIR_TOTAL_HEAD
@@ -254,10 +254,19 @@ C.... "new" formula for computing vel in wetting/drying routine
       NAMELIST /inundationOutputControl/ inundationOutput, inunThresh
 C.... SB
       NAMELIST /VEW1DChannelControl/ activateVEW1DChannelWetPerimeter,
-     &  BARMIN64_SUBM, BARMIN64_NOSUBM, BARMIN64_SLIM, 
+     &  BARMIN64_SUBM, BARMIN64_NOSUBM, BARMIN64_SLIM,
      &  BARSLIM64_ELEM, BARSLIM64_EDGE
-C     Flux boundaries: internal barrier weirs (IBTYPE 4/24)
-      NAMELIST /boundaryControl/ IMPLICIT_WEIR, WEIR_TOTAL_HEAD
+C     Flux boundaries: internal barrier weirs (IBTYPE 4/24) and vertical
+C     element walls (IBTYPE 64). The VEW options are also accepted in
+C     VEW1DChannelControl under their earlier names; boundaryControl wins.
+      LOGICAL :: VEW_WET_PERIMETER
+      REAL(8) :: VEW_SUBMERGE_DEPTH, VEW_STAY_SUBMERGED_DEPTH,
+     &  VEW_SUBMERGE_DEPTH_ANY_SLOPE, VEW_SUBMERGE_SLOPE_ELEM,
+     &  VEW_SUBMERGE_SLOPE_EDGE, VEW_CORNER_DEPTH
+      NAMELIST /boundaryControl/ IMPLICIT_WEIR, WEIR_TOTAL_HEAD,
+     &  VEW_WET_PERIMETER, VEW_SUBMERGE_DEPTH, VEW_STAY_SUBMERGED_DEPTH,
+     &  VEW_SUBMERGE_DEPTH_ANY_SLOPE, VEW_SUBMERGE_SLOPE_ELEM,
+     &  VEW_SUBMERGE_SLOPE_EDGE, VEW_CORNER_DEPTH
 C.... DMW
       NAMELIST /TVWControl/ USE_TVW,TVW_FILE,NOUT_TVW,TOUTS_TVW,
      &                      TOUTF_TVW,NSPOOL_TVW
@@ -795,27 +804,42 @@ C     Channel wet perimeter for bottom friction 11/06/2023 sb
       activateVEW1DChannelWetPerimeter = .false.
       READ(UNIT=15,NML=VEW1DChannelControl,IOSTAT=ios,IOMSG=ios_nml_error_msg)
       call logNamelistReadStatus(namelistSpecifier, ios,ios_nml_error_msg)
-      write(scratchMessage,'(a,l1)') "activateVEW1DChannelWetPerimeter=",
-     &   activateVEW1DChannelWetPerimeter
-      call logMessage(ECHO,trim(scratchMessage))
-      write(scratchMessage,'(a,f15.7)') "BARMIN64_SUBM=",BARMIN64_SUBM
-      call logMessage(ECHO,trim(scratchMessage))
-      write(scratchMessage,'(a,f15.7)') "BARMIN64_NOSUBM=",BARMIN64_NOSUBM
-      call logMessage(ECHO,trim(scratchMessage))
-      write(scratchMessage,'(a,f15.7)') "BARMIN64_SLIM=",BARMIN64_SLIM
-      call logMessage(ECHO,trim(scratchMessage))
-      write(scratchMessage,'(a,f15.7)') "BARSLIM64_ELEM=",BARSLIM64_ELEM
-      call logMessage(ECHO,trim(scratchMessage))
-      write(scratchMessage,'(a,f15.7)') "BARSLIM64_EDGE=",BARSLIM64_EDGE
-      call logMessage(ECHO,trim(scratchMessage))
       rewind(15)
 
-C     Internal barrier weirs: flux at the new time level (WEIR_PAIRS)
+C     Internal barrier weirs: flux at the new time level (WEIR_PAIRS);
+C     VEW options under their boundaryControl names
+      VEW_WET_PERIMETER = activateVEW1DChannelWetPerimeter
+      VEW_SUBMERGE_DEPTH = BARMIN64_NOSUBM
+      VEW_STAY_SUBMERGED_DEPTH = BARMIN64_SUBM
+      VEW_SUBMERGE_DEPTH_ANY_SLOPE = BARMIN64_SLIM
+      VEW_SUBMERGE_SLOPE_ELEM = BARSLIM64_ELEM
+      VEW_SUBMERGE_SLOPE_EDGE = BARSLIM64_EDGE
+      VEW_CORNER_DEPTH = BARMIN64_CORNER
       namelistSpecifier = 'boundaryControl'
       READ(UNIT=15,NML=boundaryControl,IOSTAT=ios,IOMSG=ios_nml_error_msg)
       call logNamelistReadStatus(namelistSpecifier, ios,ios_nml_error_msg)
+      activateVEW1DChannelWetPerimeter = VEW_WET_PERIMETER
+      BARMIN64_NOSUBM = VEW_SUBMERGE_DEPTH
+      BARMIN64_SUBM = VEW_STAY_SUBMERGED_DEPTH
+      BARMIN64_SLIM = VEW_SUBMERGE_DEPTH_ANY_SLOPE
+      BARSLIM64_ELEM = VEW_SUBMERGE_SLOPE_ELEM
+      BARSLIM64_EDGE = VEW_SUBMERGE_SLOPE_EDGE
+      BARMIN64_CORNER = VEW_CORNER_DEPTH
       write(scratchMessage,'(a,l1,a,l1)') "IMPLICIT_WEIR=",
      &   IMPLICIT_WEIR, " WEIR_TOTAL_HEAD=", WEIR_TOTAL_HEAD
+      call logMessage(ECHO,trim(scratchMessage))
+      write(scratchMessage,'(a,l1)') "VEW_WET_PERIMETER=",
+     &   VEW_WET_PERIMETER
+      call logMessage(ECHO,trim(scratchMessage))
+      write(scratchMessage,'(3(a,f15.7))')
+     &   "VEW_SUBMERGE_DEPTH=",VEW_SUBMERGE_DEPTH,
+     &   " VEW_STAY_SUBMERGED_DEPTH=",VEW_STAY_SUBMERGED_DEPTH,
+     &   " VEW_SUBMERGE_DEPTH_ANY_SLOPE=",VEW_SUBMERGE_DEPTH_ANY_SLOPE
+      call logMessage(ECHO,trim(scratchMessage))
+      write(scratchMessage,'(3(a,es14.6))')
+     &   "VEW_SUBMERGE_SLOPE_ELEM=",VEW_SUBMERGE_SLOPE_ELEM,
+     &   " VEW_SUBMERGE_SLOPE_EDGE=",VEW_SUBMERGE_SLOPE_EDGE,
+     &   " VEW_CORNER_DEPTH=",VEW_CORNER_DEPTH
       call logMessage(ECHO,trim(scratchMessage))
       rewind(15)
 
