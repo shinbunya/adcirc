@@ -134,7 +134,7 @@ Casey 251212: Adding time control.
 
       USE WEIR, ONLY: FOUND_TVW_NML
       USE WEIR_PAIRS, ONLY: IMPLICIT_WEIR, WEIR_TOTAL_HEAD
-      USE VEW1D, ONLY: VEW_ROTATE_VELOCITY
+      USE VEW1D, ONLY: VEW_ROTATE_VELOCITY, SETUP_COUPLED_GROUPS
       USE TIME_VARYING_WEIR_BOUNDARY
       USE OWIWIND,ONLY: nPowellSearchDomains
       USE mod_nws08, only: setNws08f15Parameters, readNws08Namelist, getVortexModelStringNws8 => getVortexModelString
@@ -4918,6 +4918,8 @@ C...
       CLOSE(15)
 
 !...  When using the consistent matrix, we need to pre-compute the CSR positions
+!...  and the coupled groups (VEW pairs, condensed nodes) with their GWCE neighbour table
+      if (ILUMP==0) call SETUP_COUPLED_GROUPS()
       if (ILUMP==0) call compute_csr_positions()
 
 C
