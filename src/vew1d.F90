@@ -33,7 +33,15 @@ module vew1d
    private
 
    public :: ROTATE_AT_CONDENSEDNODES_ALL, ROTATEBACK_AT_CONDENSEDNODES_ALL, &
-             REMOVE_NORMAL_AT_CONDENSEDNODES, GET_STREAMDIRECTION_AT_ELEMENT
+             REMOVE_NORMAL_AT_CONDENSEDNODES, GET_STREAMDIRECTION_AT_ELEMENT, &
+             VEW_ROTATE_VELOCITY
+
+   !...VEW_ROTATE_VELOCITY (boundaryControl, default off): rotate the element velocities and
+   !   fluxes at two-node condensed groups along uncoupled VEW or land boundaries to the stream
+   !   direction in the GWCE and momentum element integrals (ROTATE_AT_CONDENSEDNODES). The nodal
+   !   treatments (rotate-back and removal of the normal component of the momentum load, wind stress
+   !   and Coriolis) do not depend on it.
+   logical :: VEW_ROTATE_VELOCITY = .false.
 
 contains
 
@@ -147,8 +155,9 @@ contains
       integer :: IBND
       logical :: DO_ROTATE
 
+      if (.not. VEW_ROTATE_VELOCITY) return
       if (.not. LoadCondensedNodes) return
-      if (.not. NCondensedNodes(IND) /= 2) return
+      if (NCondensedNodes(IND) /= 2) return
 
       IBND = LBArray_Pointer(IND)
       if (IBND <= 0) return

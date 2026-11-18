@@ -3016,7 +3016,7 @@ nspool_TVW
 .. _boundaryControl:
 
 boundaryControl
-   Fortran namelist for flux boundary options: :ref:`IMPLICIT_WEIR <IMPLICIT_WEIR>` and :ref:`WEIR_TOTAL_HEAD <WEIR_TOTAL_HEAD>` for internal barriers, and the vertical element wall (IBTYPE 64) options :ref:`VEW_WET_PERIMETER <VEW_WET_PERIMETER>`, :ref:`VEW_SUBMERGE_DEPTH <VEW_SUBMERGE_DEPTH>`, :ref:`VEW_STAY_SUBMERGED_DEPTH <VEW_STAY_SUBMERGED_DEPTH>`, :ref:`VEW_SUBMERGE_DEPTH_ANY_SLOPE <VEW_SUBMERGE_DEPTH_ANY_SLOPE>`, :ref:`VEW_SUBMERGE_SLOPE_ELEM <VEW_SUBMERGE_SLOPE_ELEM>`, :ref:`VEW_SUBMERGE_SLOPE_EDGE <VEW_SUBMERGE_SLOPE_EDGE>` and :ref:`VEW_CORNER_DEPTH <VEW_CORNER_DEPTH>`. All entries are optional. The first six VEW options are also read from the earlier VEW1DChannelControl namelist under the names activateVEW1DChannelWetPerimeter, BARMIN64_NOSUBM, BARMIN64_SUBM, BARMIN64_SLIM, BARSLIM64_ELEM and BARSLIM64_EDGE; a value given in boundaryControl takes precedence. In parallel runs, adcprep writes all of them to each subdomain fort.15 file in boundaryControl.
+   Fortran namelist for flux boundary options: :ref:`IMPLICIT_WEIR <IMPLICIT_WEIR>` and :ref:`WEIR_TOTAL_HEAD <WEIR_TOTAL_HEAD>` for internal barriers, and the vertical element wall (IBTYPE 64) options :ref:`VEW_WET_PERIMETER <VEW_WET_PERIMETER>`, :ref:`VEW_SUBMERGE_DEPTH <VEW_SUBMERGE_DEPTH>`, :ref:`VEW_STAY_SUBMERGED_DEPTH <VEW_STAY_SUBMERGED_DEPTH>`, :ref:`VEW_SUBMERGE_DEPTH_ANY_SLOPE <VEW_SUBMERGE_DEPTH_ANY_SLOPE>`, :ref:`VEW_SUBMERGE_SLOPE_ELEM <VEW_SUBMERGE_SLOPE_ELEM>`, :ref:`VEW_SUBMERGE_SLOPE_EDGE <VEW_SUBMERGE_SLOPE_EDGE>`, :ref:`VEW_CORNER_DEPTH <VEW_CORNER_DEPTH>` and :ref:`VEW_ROTATE_VELOCITY <VEW_ROTATE_VELOCITY>`. All entries are optional. The first six VEW options are also read from the earlier VEW1DChannelControl namelist under the names activateVEW1DChannelWetPerimeter, BARMIN64_NOSUBM, BARMIN64_SUBM, BARMIN64_SLIM, BARSLIM64_ELEM and BARSLIM64_EDGE; a value given in boundaryControl takes precedence. In parallel runs, adcprep writes all of them to each subdomain fort.15 file in boundaryControl.
 
 .. _IMPLICIT_WEIR:
 
@@ -3062,6 +3062,11 @@ VEW_SUBMERGE_SLOPE_EDGE
 
 VEW_CORNER_DEPTH
    Optional real value in m (:ref:`boundaryControl <boundaryControl>`), default the larger of 0.2 and 2 times H0: total depth at the wall top below which a submerged vertical element wall node pair whose wall-top node has fewer than three wet neighbours, or a steep water surface along the wall, is no longer submerged.
+
+.. _VEW_ROTATE_VELOCITY:
+
+VEW_ROTATE_VELOCITY
+   Optional logical value (:ref:`boundaryControl <boundaryControl>`), default .false.: at the nodes of two-node :ref:`condensed_nodes` groups along a vertical element wall that is not submerged, or along a land boundary, rotate the velocities and fluxes used in the GWCE and momentum element integrals to the stream direction (see :ref:`1d_channel`). The removal of the across-channel component of the nodal momentum load, wind stress and Coriolis force at those nodes is always applied.
 
 .. _TVW:
 

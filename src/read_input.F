@@ -134,6 +134,7 @@ Casey 251212: Adding time control.
 
       USE WEIR, ONLY: FOUND_TVW_NML
       USE WEIR_PAIRS, ONLY: IMPLICIT_WEIR, WEIR_TOTAL_HEAD
+      USE VEW1D, ONLY: VEW_ROTATE_VELOCITY
       USE TIME_VARYING_WEIR_BOUNDARY
       USE OWIWIND,ONLY: nPowellSearchDomains
       USE mod_nws08, only: setNws08f15Parameters, readNws08Namelist, getVortexModelStringNws8 => getVortexModelString
@@ -266,7 +267,7 @@ C     VEW1DChannelControl under their earlier names; boundaryControl wins.
       NAMELIST /boundaryControl/ IMPLICIT_WEIR, WEIR_TOTAL_HEAD,
      &  VEW_WET_PERIMETER, VEW_SUBMERGE_DEPTH, VEW_STAY_SUBMERGED_DEPTH,
      &  VEW_SUBMERGE_DEPTH_ANY_SLOPE, VEW_SUBMERGE_SLOPE_ELEM,
-     &  VEW_SUBMERGE_SLOPE_EDGE, VEW_CORNER_DEPTH
+     &  VEW_SUBMERGE_SLOPE_EDGE, VEW_CORNER_DEPTH, VEW_ROTATE_VELOCITY
 C.... DMW
       NAMELIST /TVWControl/ USE_TVW,TVW_FILE,NOUT_TVW,TOUTS_TVW,
      &                      TOUTF_TVW,NSPOOL_TVW
@@ -828,8 +829,8 @@ C     VEW options under their boundaryControl names
       write(scratchMessage,'(a,l1,a,l1)') "IMPLICIT_WEIR=",
      &   IMPLICIT_WEIR, " WEIR_TOTAL_HEAD=", WEIR_TOTAL_HEAD
       call logMessage(ECHO,trim(scratchMessage))
-      write(scratchMessage,'(a,l1)') "VEW_WET_PERIMETER=",
-     &   VEW_WET_PERIMETER
+      write(scratchMessage,'(a,l1,a,l1)') "VEW_WET_PERIMETER=",
+     &   VEW_WET_PERIMETER, " VEW_ROTATE_VELOCITY=", VEW_ROTATE_VELOCITY
       call logMessage(ECHO,trim(scratchMessage))
       write(scratchMessage,'(3(a,f15.7))')
      &   "VEW_SUBMERGE_DEPTH=",VEW_SUBMERGE_DEPTH,

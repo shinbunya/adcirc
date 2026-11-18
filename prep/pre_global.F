@@ -369,10 +369,11 @@ C     The same VEW options under their boundaryControl names (see read_input.F)
       REAL(8) :: VEW_SUBMERGE_SLOPE_ELEM = 4.D-4
       REAL(8) :: VEW_SUBMERGE_SLOPE_EDGE = 1.D-4
       REAL(8) :: VEW_CORNER_DEPTH = -1.D0
+      logical :: VEW_ROTATE_VELOCITY = .false.
       NAMELIST /boundaryControl/ IMPLICIT_WEIR, WEIR_TOTAL_HEAD,
      &  VEW_WET_PERIMETER, VEW_SUBMERGE_DEPTH, VEW_STAY_SUBMERGED_DEPTH,
      &  VEW_SUBMERGE_DEPTH_ANY_SLOPE, VEW_SUBMERGE_SLOPE_ELEM,
-     &  VEW_SUBMERGE_SLOPE_EDGE, VEW_CORNER_DEPTH
+     &  VEW_SUBMERGE_SLOPE_EDGE, VEW_CORNER_DEPTH, VEW_ROTATE_VELOCITY
 
 C     Full luni-solar tidal potential namelist: 2024
       logical:: foundTidalPotentialControlNamelist = .false. 
