@@ -3016,7 +3016,7 @@ nspool_TVW
 .. _boundaryControl:
 
 boundaryControl
-   Fortran namelist for flux boundary options: :ref:`IMPLICIT_WEIR <IMPLICIT_WEIR>` and :ref:`WEIR_TOTAL_HEAD <WEIR_TOTAL_HEAD>` for internal barriers, and the vertical element wall (IBTYPE 64) options :ref:`VEW_WET_PERIMETER <VEW_WET_PERIMETER>`, :ref:`VEW_SUBMERGE_DEPTH <VEW_SUBMERGE_DEPTH>`, :ref:`VEW_STAY_SUBMERGED_DEPTH <VEW_STAY_SUBMERGED_DEPTH>`, :ref:`VEW_SUBMERGE_DEPTH_ANY_SLOPE <VEW_SUBMERGE_DEPTH_ANY_SLOPE>`, :ref:`VEW_SUBMERGE_SLOPE_ELEM <VEW_SUBMERGE_SLOPE_ELEM>`, :ref:`VEW_SUBMERGE_SLOPE_EDGE <VEW_SUBMERGE_SLOPE_EDGE>`, :ref:`VEW_CORNER_DEPTH <VEW_CORNER_DEPTH>` and :ref:`VEW_ROTATE_VELOCITY <VEW_ROTATE_VELOCITY>`. All entries are optional. The first six VEW options are also read from the earlier VEW1DChannelControl namelist under the names activateVEW1DChannelWetPerimeter, BARMIN64_NOSUBM, BARMIN64_SUBM, BARMIN64_SLIM, BARSLIM64_ELEM and BARSLIM64_EDGE; a value given in boundaryControl takes precedence. In parallel runs, adcprep writes all of them to each subdomain fort.15 file in boundaryControl.
+   Fortran namelist for flux boundary options: :ref:`IMPLICIT_WEIR <IMPLICIT_WEIR>` and :ref:`WEIR_TOTAL_HEAD <WEIR_TOTAL_HEAD>` for internal barriers, and the vertical element wall (IBTYPE 64) options :ref:`VEW_WET_PERIMETER <VEW_WET_PERIMETER>`, :ref:`VEW_SUBMERGE_DEPTH <VEW_SUBMERGE_DEPTH>`, :ref:`VEW_STAY_SUBMERGED_DEPTH <VEW_STAY_SUBMERGED_DEPTH>`, :ref:`VEW_SUBMERGE_DEPTH_ANY_SLOPE <VEW_SUBMERGE_DEPTH_ANY_SLOPE>`, :ref:`VEW_SUBMERGE_SLOPE_ELEM <VEW_SUBMERGE_SLOPE_ELEM>`, :ref:`VEW_SUBMERGE_SLOPE_EDGE <VEW_SUBMERGE_SLOPE_EDGE>`, :ref:`VEW_CORNER_DEPTH <VEW_CORNER_DEPTH>`, :ref:`VEW_ROTATE_VELOCITY <VEW_ROTATE_VELOCITY>` and :ref:`VEW_LUMP_MASS <VEW_LUMP_MASS>`. All entries are optional. The first six VEW options are also read from the earlier VEW1DChannelControl namelist under the names activateVEW1DChannelWetPerimeter, BARMIN64_NOSUBM, BARMIN64_SUBM, BARMIN64_SLIM, BARSLIM64_ELEM and BARSLIM64_EDGE; a value given in boundaryControl takes precedence. In parallel runs, adcprep writes all of them to each subdomain fort.15 file in boundaryControl.
 
 .. _IMPLICIT_WEIR:
 
@@ -3067,6 +3067,11 @@ VEW_CORNER_DEPTH
 
 VEW_ROTATE_VELOCITY
    Optional logical value (:ref:`boundaryControl <boundaryControl>`), default .false.: at the nodes of two-node :ref:`condensed_nodes` groups along a vertical element wall that is not submerged, or along a land boundary, rotate the velocities and fluxes used in the GWCE and momentum element integrals to the stream direction (see :ref:`1d_channel`). The removal of the across-channel component of the nodal momentum load, wind stress and Coriolis force at those nodes is always applied.
+
+.. _VEW_LUMP_MASS:
+
+VEW_LUMP_MASS
+   Optional logical value (:ref:`boundaryControl <boundaryControl>`), default .true.: with the consistent GWCE (:ref:`IM` sixth digit 1, or IM = 0) on a mesh with vertical element walls or :ref:`condensed_nodes`, use the lumped mass (time-derivative and :ref:`TAU0 <TAU0>`) term in every element that has a node of a VEW pair or condensed node group, in the matrix and the load vector alike; the other terms stay consistent. The VEW channels then have the mass distribution of the lumped GWCE, which keeps narrow channels resolved by a single row of elements from overshooting. Set .false. for the consistent mass everywhere.
 
 .. _TVW:
 

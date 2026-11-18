@@ -34,7 +34,7 @@ module vew1d
 
    public :: ROTATE_AT_CONDENSEDNODES_ALL, ROTATEBACK_AT_CONDENSEDNODES_ALL, &
              REMOVE_NORMAL_AT_CONDENSEDNODES, GET_STREAMDIRECTION_AT_ELEMENT, &
-             VEW_ROTATE_VELOCITY, &
+             VEW_ROTATE_VELOCITY, VEW_LUMP_MASS, &
              SETUP_COUPLED_GROUPS, UPDATE_ACTIVE_GROUPS, GROUP_LOAD_SUM, GROUP_COPY_INCREMENT, &
              GROUP_SLOT, NSGROUPS, NSGROUPS_GBL, ISSGMEMBER, SGELEM, GMAP, NeiTabG, NNeighG, &
              GROUP_IMAX
@@ -45,6 +45,12 @@ module vew1d
    !   treatments (rotate-back and removal of the normal component of the momentum load, wind stress
    !   and Coriolis) do not depend on it.
    logical :: VEW_ROTATE_VELOCITY = .false.
+
+   !...VEW_LUMP_MASS (boundaryControl, default on): with the consistent-mass GWCE (ILump = 0)
+   !   and coupled groups, use the lumped mass (time-derivative and tau0) term in every element that
+   !   has a node in a static group, in the matrix and the load vector alike; the other terms stay
+   !   consistent. The VEW1D channel then has the mass distribution of the lumped GWCE.
+   logical :: VEW_LUMP_MASS = .true.
 
    !...Coupled groups for the consistent-mass GWCE (ILump = 0). Nodes that share one water level
    !   (VEW pairs in Case 1 with both nodes wet, wet members of a condensed node group, and chains of
