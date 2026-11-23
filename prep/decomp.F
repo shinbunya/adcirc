@@ -169,8 +169,8 @@ C        then make it and its dual a local Weir-node pair
       IF (NWEIR.GT.0) THEN
         DO I=1, NPROC
 C          Mark the subdomain's nodes, then keep each pair with a marked
-C          node, in the order of the global list; with coupled groups
-C          (consistent GWCE), also each pair of a group the subdomain holds
+C          node, in the order of the global list; with coupled groups,
+C          also each pair of a group the subdomain holds
            DO K = 1, NNODP(I)
               ONPE(IMAP_NOD_LG(K,I)) = .TRUE.
            ENDDO
@@ -704,19 +704,18 @@ C  Takes dry run through the domain decomp to determine the max number of   C
 C  nodes and elements assigned to any subdomain to determine MNPP and MNEP. C
 C                                                                           C
 C----------------------------------------------------------------------
-C     PREP_GROUPS: coupled groups for the consistent GWCE.
+C     PREP_GROUPS: coupled groups.
 C     With the consistent GWCE (ILump = 0 in ADCIRC), padcirc solves one
 C     unknown per group of nodes that share a water level (VEW pairs and
 C     condensed node groups) and needs, on every subdomain that holds a
 C     member of such a group, all members and all elements around them
-C     (src/vew1d.F90, SETUP_COUPLED_GROUPS). This builds the static
-C     groups over the full domain: connected sets under all weir/VEW
-C     pairs (IBTYPE 4/24/64) and all condensed node groups (fort.13
-C     attribute condensed_nodes). The lumped GWCE needs it only for VEW
-C     pairs in weir mode solved at the new time level (IMPLICIT_WEIR,
-C     src/weir_pairs.F90), whose correction goes to a whole group;
-C     without IBTYPE 64 boundaries, or with IMPLICIT_WEIR = .false., the
-C     lumped GWCE's decomposition is left as it was.
+C     (src/vew1d.F90, SETUP_COUPLED_GROUPS). The lumped GWCE needs it for
+C     VEW pairs in weir mode solved at the new time level (IMPLICIT_WEIR,
+C     src/weir_pairs.F90), whose correction goes to a whole group. This
+C     builds the static groups over the full domain: connected sets under
+C     all weir/VEW pairs (IBTYPE 4/24/64) and all condensed node groups
+C     (fort.13 attribute condensed_nodes). They depend on fort.14 and
+C     fort.13 only, so that one decomposition serves any fort.15.
 C----------------------------------------------------------------------
       SUBROUTINE PREP_GROUPS()
       USE PRE_GLOBAL
@@ -725,21 +724,10 @@ C----------------------------------------------------------------------
       INTEGER :: NODE, MEMB, NGROUPS
       REAL(8) :: VALS(64)
       CHARACTER(len=80) :: LINE, NAMES(64)
-      LOGICAL :: FOUND, CONSISTENT, VEW
+      LOGICAL :: FOUND
 
       IF (GROUPS_BUILT) RETURN
       GROUPS_BUILT = .TRUE.
-C     consistent GWCE: IM digit 6 /= 2 for 6-digit IM, any other IM
-      IF (IM.GE.100000) THEN
-         CONSISTENT = (MOD(IM,10).NE.2)
-      ELSE
-         CONSISTENT = .TRUE.
-      ENDIF
-      VEW = .FALSE.
-      DO K = 1, NBOU
-         IF (IBTYPE(K).EQ.64) VEW = .TRUE.
-      ENDDO
-      IF (.NOT.(CONSISTENT .OR. (VEW .AND. IMPLICIT_WEIR))) RETURN
       ALLOCATE(GROOT(NNODG), GSIZE(NNODG), GTOUCH(NNODG))
       DO N = 1, NNODG
          GROOT(N) = N
@@ -761,6 +749,9 @@ C     condensed node groups from the full-domain fort.13
             READ(IU,*) NVALS(K)
             READ(IU,*) (VALS(M), M=1,NVALS(K))
          ENDDO
+C        go on only if the file has condensed nodes and is for this mesh
+         IF (NNOD.NE.NNODG .OR. .NOT.ANY(
+     &       ADJUSTL(NAMES(1:NATTR)).EQ.'condensed_nodes')) NATTR = 0
          DO K = 1, NATTR
             READ(IU,'(A80)') LINE
             READ(IU,*) NND
@@ -837,16 +828,35 @@ C     condensed node groups from the full-domain fort.13
 
 C----------------------------------------------------------------------
 C     TOUCH_GROUPS: mark the coupled groups that have a member among the
-C     nodes NODELIST of subdomain IPROC
+C     nodes NODELIST of subdomain IPROC, and the groups that share an
+C     element with one of these. The rows of the GWCE matrix that the
+C     subdomain solves have columns at the representatives of the latter;
+C     a group the subdomain held only in part would get another
+C     representative there than in the other subdomains.
 C----------------------------------------------------------------------
       SUBROUTINE TOUCH_GROUPS(IPROC, NN, NODELIST)
       USE PRE_GLOBAL
       IMPLICIT NONE
       INTEGER, INTENT(IN) :: IPROC, NN, NODELIST(NN)
-      INTEGER :: K, R
+      INTEGER :: J, K, R
+      LOGICAL, EXTERNAL :: GROUP_TOUCHED
       DO K = 1, NN
          R = GROOT(NODELIST(K))
          IF (GSIZE(R).GT.1) GTOUCH(R) = IPROC
+      ENDDO
+C     neighbouring groups, marked -IPROC first so that the search does not
+C     go on from them
+      DO K = 1, NELG
+         IF (.NOT.GROUP_TOUCHED(IPROC,NNEG(1,K),NNEG(2,K),NNEG(3,K)))
+     &      CYCLE
+         DO J = 1, 3
+            R = GROOT(NNEG(J,K))
+            IF (GSIZE(R).GT.1 .AND. GTOUCH(R).NE.IPROC)
+     &         GTOUCH(R) = -IPROC
+         ENDDO
+      ENDDO
+      DO K = 1, NNODG
+         IF (GTOUCH(K).EQ.-IPROC) GTOUCH(K) = IPROC
       ENDDO
       END SUBROUTINE TOUCH_GROUPS
 
@@ -1001,8 +1011,8 @@ C        then make it and its dual a local Weir-node pair
       IF (GCLOSURE) CALL TOUCH_GROUPS(IPROC, NODES, NODE_LG)
       IF (NWEIR.GT.0) THEN
 C        Mark the subdomain's nodes, then keep each pair with a marked
-C        node, in the order of the global list; with coupled groups
-C        (consistent GWCE), also each pair of a group the subdomain holds
+C        node, in the order of the global list; with coupled groups,
+C        also each pair of a group the subdomain holds
          DO K = 1, NODES
             ONPE(NODE_LG(K)) = .TRUE.
          ENDDO
