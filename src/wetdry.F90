@@ -104,6 +104,9 @@ module mod_wetdry
    integer, allocatable :: nibcnt(:)
    integer, allocatable :: noffold(:)
    integer, allocatable :: noff_sg(:)
+   !...elements that hold both nodes of an internal barrier pair (IBTYPE
+   !   4/24/5/25), at the ends of a barrier string; they are never wet
+   logical, allocatable :: pairBridge(:)
 
    ! jgf52.08.08: Enable analyst to remove NOFF from wetting and
    ! drying algorithm; .true. by default to conform with prior
@@ -193,6 +196,8 @@ contains
 #endif
       real(8) :: totArea1, totArea2, eta2Avg
       integer :: tk_cnt(np)
+      integer :: nibwet(np)
+      real(8) :: levmax
       integer :: nbnctot
       integer :: i, j, k, l
       integer :: ie
@@ -959,8 +964,25 @@ contains
       !WET...Check for adjacent nodes and force nodes wet when attached
       !WET...to receiving barrier nodes
       !WET...
+      !...Only a node whose ground lies below the level of a receiving node
+      !   it shares an element with is wetted; otherwise a node on the crest
+      !   or on a dune next to the end of a barrier string is wetted with no
+      !   water, and the element at the end of the string that holds both
+      !   nodes of a pair joins the two sides (NIBWET marks the nodes)
+      NIBWET(:) = 0
+      do IE = 1, NE
+         LEVMAX = -huge(1.d0)
+         do K = 1, 3
+            if (NIBNODECODE(NM(IE, K)) > 0) LEVMAX = max(LEVMAX, ETA2(NM(IE, K)))
+         end do
+         if (LEVMAX > -huge(1.d0)) then
+            do K = 1, 3
+               if (-DP(NM(IE, K)) < LEVMAX) NIBWET(NM(IE, K)) = 1
+            end do
+         end if
+      end do
       do I = 1, NP
-         if ((NIBCNT(I) > 0) .and. (NNODECODE(I) == 0)) then
+         if ((NIBCNT(I) > 0) .and. (NNODECODE(I) == 0) .and. (NIBWET(I) == 1)) then
             NNODECODE(I) = 1
          end if
       end do
@@ -1167,6 +1189,13 @@ contains
          end if
       end do
 #endif
+
+      !...An element holding both nodes of an internal barrier pair would join
+      !   the two sides of the barrier: never wet
+      if (.not. allocated(pairBridge)) call findPairBridges()
+      do I = 1, NE
+         if (pairBridge(I)) NOFF(I) = 0
+      end do
 
       !WET...
       !WET...END WET/DRY SECTION  - PART 3
@@ -1601,6 +1630,32 @@ contains
 
    !-----------------------------------------------------------------------
    !-----------------------------------------------------------------------
+
+   !----------------------------------------------------------------------
+   !  findPairBridges: mark the elements that hold both nodes of an
+   !  internal barrier pair (IBTYPE 4, 24, 5, 25)
+   !----------------------------------------------------------------------
+   subroutine findPairBridges()
+      use mesh, only: ne, nm, nneighele, neitabele
+      use BOUNDARIES, only: IBCONN, LBCODEI, NVEL, NBV
+      implicit none
+      integer :: J, K, IE, NA, NB
+      allocate (pairBridge(NE))
+      pairBridge = .false.
+      do J = 1, NVEL
+         select case (LBCODEI(J))
+         case (4, 24, 5, 25)
+            NA = NBV(J)
+            NB = IBCONN(J)
+            if (NA <= 0 .or. NB <= 0) cycle
+            do K = 1, NNeighEle(NA)
+               IE = NeiTabEle(NA, K)
+               if (any(NM(IE, :) == NB)) pairBridge(IE) = .true.
+            end do
+         end select
+      end do
+   end subroutine findPairBridges
+
 end module mod_wetdry
 !-----------------------------------------------------------------------
 !-----------------------------------------------------------------------
