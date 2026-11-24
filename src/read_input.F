@@ -85,6 +85,7 @@ C-----------------------------------------------------------------------
      &   StatPartWetFix, How2FixStatPartWet, cgwce_hdp, ifnl_hdp, 
      &   CAliDisp, IFSFM, usingDynamicWaterLevelCorrection,slim,windlim,
      &   directvelWD,useHF,Limit_WaveStressGrad, directvelWD,useHF, 
+     &   gwceHistoryPrevWet,
      &   WarnVel, toLowercase,UseInterpInset,found_InterpInset_Namelist,
      &   Pfile_inset, Wfile_inset, InsetControlFile, TimeConv, logNamelistReadStatus
 #if defined CSWAN
@@ -250,7 +251,7 @@ Casey 251212: Adding time control.
      &  noffActive, StatPartWetFix, How2FixStatPartWet,
 C.... DMW 202207 Add options for controlling slope/wind limiting and
 C.... "new" formula for computing vel in wetting/drying routine
-     &  slim, windlim, directvelWD, useHF
+     &  slim, windlim, directvelWD, useHF, gwceHistoryPrevWet
       NAMELIST /inundationOutputControl/ inundationOutput, inunThresh
 C.... SB
       NAMELIST /VEW1DChannelControl/ activateVEW1DChannelWetPerimeter,
@@ -662,6 +663,9 @@ C.... "new" formula for computing vel in wetting/drying routine
       write(scratchMessage,'(a,l)') "directvelWD=",directvelWD
       call logMessage(ECHO,trim(scratchMessage))
       write(scratchMessage,'(a,l)') "useHF=",useHF
+      call logMessage(ECHO,trim(scratchMessage))
+      write(scratchMessage,'(a,l)') "gwceHistoryPrevWet=",
+     &   gwceHistoryPrevWet
       call logMessage(ECHO,trim(scratchMessage))
 C.... DMW
       rewind(15)

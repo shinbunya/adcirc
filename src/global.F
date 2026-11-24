@@ -792,6 +792,11 @@ C....  Set these controls to off by default. (Large value on slim effectively as
       
       logical :: directvelWD = .false.,  useHF = .false.
 C.... DMW
+C     &wetDryControl gwceHistoryPrevWet: assemble the GWCE's time-history
+C     (previous increment) term over the elements wet in the previous
+C     solve instead of the current ones, so that elements that wet or dry
+C     between two solves neither create nor remove water (default off)
+      logical :: gwceHistoryPrevWet = .false.
 
 C     v49.48.01 tcm 20110126 Variables related to kdtree searches
       INTEGER :: SRCHDP=100

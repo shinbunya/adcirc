@@ -2396,7 +2396,7 @@ Casey 180318: Added NWS=13
 
          ! wet dry control
          if (foundWetDryControlNameList) then
-            WRITE(15,'(a,l,a,l,a,l,a,l,a,i1,a,ES24.16E3,a,l,a,l,a,l,a)')
+            WRITE(15,'(a,l,a,l,a,l,a,l,a,i1,a,ES24.16E3,a,l,a,l,a,l,a,l,a)')
      &         "&wetDryControl outputNodeCode=",outputNodeCode,
      &         " outputNOFF=",outputNOFF," noffActive=",noffActive,
      &         " StatPartWetFix=",StatPartWetFix,
@@ -2405,7 +2405,8 @@ C....    DMW 202207 Add in options for controlling slope/wind limiting and "new"
      &         " slim=",slim,
      &         " windlim=",windlim,
      &         " directvelWD=",directvelWD,
-     &         " useHF=",useHF," /"
+     &         " useHF=",useHF,
+     &         " gwceHistoryPrevWet=",gwceHistoryPrevWet," /"
 C....    DMW
          endif
          ! jgf52.08.02: inundation output control

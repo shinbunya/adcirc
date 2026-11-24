@@ -141,6 +141,7 @@ Casey 121019: Added multiplication factor to be used before sending winds to cou
       USE GLOBAL, ONLY :
      &    USE_TVW,TVW_FILE,NOUT_TVW,TOUTS_TVW,TOUTF_TVW,NSPOOL_TVW,
      &    outputWindDrag,slim,windlim,directvelWD,useHF,
+     &    gwceHistoryPrevWet,
      &    Limit_WaveStressGrad,  !tcm v56 2024: added
      &    PFile_inset, Wfile_inset, InsetControlFile, !aman added
      &    SWAN_OutputHS,SWAN_OutputDIR,SWAN_OutputTM01,

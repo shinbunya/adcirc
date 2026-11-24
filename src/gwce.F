@@ -108,6 +108,9 @@ C     GWCE coefficient arrays
       real(8), pointer :: coefDTemp(:) => null()
       real(8), allocatable :: coef(:,:)
       real(8), allocatable :: gwce_lv(:) 
+      ! gwceHistoryPrevWet: each element's NCEle in the previous solve
+      ! (-1: not set yet, e.g. the first step after a cold or hot start)
+      integer, allocatable :: nceleold(:)
 
 cjjw...added 2 lines
 C.....for matrix conditioning,global to allow for reading in from hotstart file
@@ -296,7 +299,8 @@ C
      &   TKM, NPERSEG, NTIP, NNPERBC, IPERCONN, VIDispDXOH,
      &   VIDispDYOH, IFSFM, IFNL_HDP, CGWCE_HDP, CAliDisp, H0, ALPHAL, windlim,
      &   usingDynamicWaterLevelCorrection, dynamicWaterLevelCorrection1,
-     &   dynamicWaterLevelCorrectionDelta, RampIntFlux
+     &   dynamicWaterLevelCorrectionDelta, RampIntFlux,
+     &   gwceHistoryPrevWet
 #ifdef CMPI
      &    , dumy1, dumy2, rnp_global
 #endif
@@ -390,6 +394,7 @@ C... SB
       REAL(8) T0N1,T0N2, T0N3
       REAL(8) Tau0Avg, Tau0QXAvg, Tau0QYAvg
       REAL(8) Tau0XGrad2A, Tau0YGrad2A, Tau0SpaVar
+      REAL(8) Hist1, Hist2, Hist3 ! gwceHistoryPrevWet
       REAL(8) TEMP_LV_A1, TEMP_LV_A2, TEMP_LV_A3
       REAL(8) TiPN1, TiPN2, TiPN3
       REAL(8) U1N1,U1N2,U1N3, U1Avg
@@ -1044,6 +1049,11 @@ C..... End DW
 
 C...  Assemble the GWCE RHS except for the boundary integral terms
 
+      IF (gwceHistoryPrevWet.AND..NOT.ALLOCATED(NCEleOld)) THEN
+         ALLOCATE(NCEleOld(NE))
+         NCEleOld(:) = -1
+      ENDIF
+
       DO IE=1,NE
 
 C...     Set nodal values for each element
@@ -1657,9 +1667,31 @@ C..... DW: begin, absorbing layer
 C..... END DW
 
 C...     Put these partial products directly into nodal storage
-         GWCE_LV(NM1)=GWCE_LV(NM1)+Temp_LV_A1*NCEle
-         GWCE_LV(NM2)=GWCE_LV(NM2)+Temp_LV_A2*NCEle
-         GWCE_LV(NM3)=GWCE_LV(NM3)+Temp_LV_A3*NCEle
+         IF (gwceHistoryPrevWet) THEN
+C...        The time-history terms (the previous increment ETAS with the
+C...        mass matrix) take the element's wet state of the previous
+C...        solve: summed over a region they then carry exactly the
+C...        volume change of the previous step, also where elements wet
+C...        or dry between the two solves
+            IF (NCEleOld(IE).LT.0) NCEleOld(IE) = NCEle
+            Hist1=(OnDiag*ESN1*SPM1 + OffDiag*(ESN2*SPM2+ESN3*SPM3))
+     &            *MsFacR
+            Hist2=(OnDiag*ESN2*SPM2 + OffDiag*(ESN1*SPM1+ESN3*SPM3))
+     &            *MsFacR
+            Hist3=(OnDiag*ESN3*SPM3 + OffDiag*(ESN1*SPM1+ESN2*SPM2))
+     &            *MsFacR
+            GWCE_LV(NM1)=GWCE_LV(NM1)+(Temp_LV_A1-Hist1)*NCEle
+     &                               +Hist1*NCEleOld(IE)
+            GWCE_LV(NM2)=GWCE_LV(NM2)+(Temp_LV_A2-Hist2)*NCEle
+     &                               +Hist2*NCEleOld(IE)
+            GWCE_LV(NM3)=GWCE_LV(NM3)+(Temp_LV_A3-Hist3)*NCEle
+     &                               +Hist3*NCEleOld(IE)
+            NCEleOld(IE) = NCEle
+         ELSE
+            GWCE_LV(NM1)=GWCE_LV(NM1)+Temp_LV_A1*NCEle
+            GWCE_LV(NM2)=GWCE_LV(NM2)+Temp_LV_A2*NCEle
+            GWCE_LV(NM3)=GWCE_LV(NM3)+Temp_LV_A3*NCEle
+         ENDIF
 
       END DO                  !End of elemental loop
 
@@ -2059,6 +2091,11 @@ C           internal weir pairs: their blocks in the matrix for this solve
          NUMITR=IPARM(1)
          DO I=1,NP
             ETA2(I)=NODECODE(I)*(ETAS(I)+dynamicWaterLevelCorrectionDelta(I))+ETA1(I) !COMPUTE NEW ELEVATIONS tgaContOffset
+C           gwceHistoryPrevWet: a dry node's increment is zero, as in the
+C           lumped branch below; the solve leaves its placeholder-row value
+C           in ETAS, which would enter the next step's history term if the
+C           node wets
+            IF (gwceHistoryPrevWet.AND.(NODECODE(I).EQ.0)) ETAS(I)=0.D0
          END DO
       ELSE ! lumped LHS
          DO I = 1, NP

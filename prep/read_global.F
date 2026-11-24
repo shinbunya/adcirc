@@ -564,7 +564,7 @@ C...tcm v51.20.03 Local variables for external station location files
      &          noffActive, StatPartWetFix, How2FixStatPartWet,
 C.... DMW 202207 Add options for controlling slope/wind limiting and
 C.... "new" formula for computing vel in wetting/drying routine 
-     &          slim, windlim, directvelWD, useHF
+     &          slim, windlim, directvelWD, useHF, gwceHistoryPrevWet
 C.... DMW
 !JLW: adding subgrid control namelist
       integer :: ios_subgrid
